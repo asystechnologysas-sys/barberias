@@ -1,0 +1,187 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+enum Role {
+  SUPERADMIN
+  OWNER
+  BARBER
+  CLIENT
+}
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+}
+enum AppointmentStatus {
+  CONFIRMED
+  CANCELLED
+}
+enum VipFrequency {
+  WEEKLY
+  BIWEEKLY
+}
+enum VipExceptionType {
+  SKIP
+  RESCHEDULE
+}
+model Organization {
+  id String @id @default(uuid())
+  name String
+  slug String @unique
+  description String? @db.Text
+  logoUrl String?
+  bannerUrl String?
+  status OrganizationStatus @default(ACTIVE)
+  subscriptionExpiresAt DateTime
+  maxBarbers Int @default(5)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users User[]
+  barbers Barber[]
+  services Service[]
+  appointments Appointment[]
+  schedules DaySchedule[]
+  blockedSlots BlockedSlot[]
+  vipSchedules VipSchedule[]
+  otps Otp[]
+  clients Client[]
+}
+model User {
+  id String @id @default(uuid())
+  organizationId String?
+  name String
+  phone String?
+  email String? @unique
+  passwordHash String
+  role Role
+  active Boolean @default(true)
+  organization Organization? @relation(fields:[organizationId],references:[id],onDelete:Cascade)
+  barber Barber?
+  client Client?
+  @@index([organizationId,role])
+}
+model Barber {
+  id String @id @default(uuid())
+  organizationId String
+  userId String @unique
+  displayName String
+  active Boolean @default(true)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Cascade)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  appointments Appointment[]
+  blocks BlockedSlot[]
+  vipSchedules VipSchedule[]
+  @@index([organizationId,active])
+}
+model Client {
+  id String @id @default(uuid())
+  organizationId String
+  userId String @unique
+  name String
+  phone String
+  verifiedAt DateTime?
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Cascade)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  appointments Appointment[]
+  vipSchedules VipSchedule[]
+  @@unique([organizationId,phone])
+}
+model Service {
+  id String @id @default(uuid())
+  organizationId String
+  name String
+  description String? @db.Text
+  price Int
+  durationMinutes Int
+  active Boolean @default(true)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Cascade)
+  appointments Appointment[]
+  @@index([organizationId,active])
+}
+model Appointment {
+  id String @id @default(uuid())
+  organizationId String
+  barberId String
+  clientId String
+  serviceId String
+  clientName String
+  clientPhone String
+  startsAt DateTime
+  endsAt DateTime
+  price Int
+  status AppointmentStatus @default(CONFIRMED)
+  reminderSentAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Cascade)
+  barber Barber @relation(fields:[barberId],references:[id])
+  client Client @relation(fields:[clientId],references:[id])
+  service Service @relation(fields:[serviceId],references:[id])
+  @@index([organizationId,startsAt])
+  @@index([barberId,startsAt])
+  @@index([clientId,status])
+}
+model DaySchedule {
+  id String @id @default(uuid())
+  organizationId String
+  barberId String?
+  weekday Int
+  openTime String
+  closeTime String
+  breakStart String?
+  breakEnd String?
+  closed Boolean @default(false)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Cascade)
+  @@unique([organizationId,barberId,weekday])
+}
+model BlockedSlot {
+  id String @id @default(uuid())
+  organizationId String
+  barberId String?
+  startsAt DateTime
+  endsAt DateTime
+  reason String?
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Cascade)
+  barber Barber? @relation(fields:[barberId],references:[id],onDelete:Cascade)
+  @@index([organizationId,startsAt])
+  @@index([barberId,startsAt])
+}
+model VipSchedule {
+  id String @id @default(uuid())
+  organizationId String
+  barberId String
+  clientId String
+  serviceId String?
+  weekday Int
+  time String
+  frequency VipFrequency
+  active Boolean @default(true)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Cascade)
+  barber Barber @relation(fields:[barberId],references:[id])
+  client Client @relation(fields:[clientId],references:[id])
+  exceptions VipException[]
+}
+model VipException {
+  id String @id @default(uuid())
+  vipScheduleId String
+  date DateTime @db.Date
+  type VipExceptionType
+  rescheduledAt DateTime?
+  vipSchedule VipSchedule @relation(fields:[vipScheduleId],references:[id],onDelete:Cascade)
+  @@unique([vipScheduleId,date])
+}
+model Otp {
+  id String @id @default(uuid())
+  organizationId String
+  phone String
+  codeHash String
+  expiresAt DateTime
+  attempts Int @default(0)
+  usedAt DateTime?
+  createdAt DateTime @default(now())
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Cascade)
+  @@index([organizationId,phone,expiresAt])
+}
