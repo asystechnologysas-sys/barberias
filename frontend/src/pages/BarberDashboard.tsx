@@ -24,8 +24,8 @@ export default function BarberDashboard() {
   const [blockReason, setBlockReason] = useState('Descanso');
 
   const [vipModalOpen, setVipModalOpen] = useState(false);
-  const [newVipWeekday, setNewVipWeekday] = useState(6); // Sábado por defecto
-  const [newVipTime, setNewVipTime] = useState('11:00'); // Selector desplegable
+  const [newVipWeekday, setNewVipWeekday] = useState(6);
+  const [newVipTime, setNewVipTime] = useState('11:00');
   const [selectedClientId, setSelectedClientId] = useState('');
 
   const [confirmModal, setConfirmModal] = useState<{ open: boolean; id: string; name: string } | null>(null);
@@ -60,10 +60,9 @@ export default function BarberDashboard() {
     return d.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hour12: false });
   };
 
-  // CÁLCULO EXACTO DEL MES CON DOMINGO A SÁBADO (CON CELDAS VACÍAS AL INICIO)
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
-  const firstDayOfMonth = new Date(year, month, 1).getDay(); // 0: Dom, 1: Lun, 2: Mar...
+  const firstDayOfMonth = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
   const emptyOffset = Array.from({ length: firstDayOfMonth }, (_, i) => i);
@@ -80,7 +79,11 @@ export default function BarberDashboard() {
     });
 
     const dayApts = appointments.filter(a => a.startsAt.startsWith(dateStr) && a.status === 'CONFIRMED');
-    const dayVips = vips.filter(v => v.weekday === dayOfWeek);
+    const dayVips = vips.filter(v => {
+      if (v.weekday !== dayOfWeek) return false;
+      const isSkipped = v.exceptions?.some((e: any) => new Date(e.date).toISOString().split('T')[0] === dateStr);
+      return !isSkipped;
+    });
 
     return {
       dayNum: i + 1,
@@ -90,7 +93,6 @@ export default function BarberDashboard() {
     };
   });
 
-  // Acciones
   const handleBlockSlot = async () => {
     try {
       const startsAt = new Date(`${selectedDate}T${slotToBlock}:00-05:00`);
@@ -103,10 +105,9 @@ export default function BarberDashboard() {
     }
   };
 
-  // CERRAR DÍA COMPLETO REAL EN BASE DE DATOS
   const handleBlockFullDay = async () => {
     try {
-      await api.post('/api/blocks/day', { dateStr: selectedDate, reason: 'Día Cerrado / No Laborable' });
+      await api.post('/api/blocks/day', { dateStr: selectedDate, reason: 'Día Cerrado' });
       setBlockDayModal(false);
       loadData();
     } catch (err: any) {
@@ -114,7 +115,6 @@ export default function BarberDashboard() {
     }
   };
 
-  // REABRIR DÍA COMPLETO
   const handleReopenDay = async () => {
     try {
       await api.delete(`/api/blocks/day/${selectedDate}`);
@@ -144,7 +144,6 @@ export default function BarberDashboard() {
     }
   };
 
-  // GUARDAR VIP REAL EN BASE DE DATOS
   const handleCreateVip = async () => {
     if (!selectedClientId) return alert('Selecciona un cliente de la lista.');
     try {
@@ -155,7 +154,6 @@ export default function BarberDashboard() {
       });
       setVipModalOpen(false);
       loadData();
-      alert('¡Cliente VIP guardado con éxito!');
     } catch (err: any) {
       alert(err.message || 'Error al asignar VIP');
     }
@@ -167,7 +165,6 @@ export default function BarberDashboard() {
     navigate('/login');
   };
 
-  // Verificar si el día seleccionado actualmente está cerrado por completo
   const isCurrentSelectedDayClosed = blocks.some(b => {
     const bStart = new Date(b.startsAt);
     const bEnd = new Date(b.endsAt);
@@ -179,7 +176,6 @@ export default function BarberDashboard() {
   return (
     <div className="admin-page-wrap">
       
-      {/* 1. ENCABEZADO SUPERIOR */}
       <header className="client-top-bar">
         <div className="client-brand-area">
           <div className="barber-logo-placeholder">AS</div>
@@ -193,7 +189,6 @@ export default function BarberDashboard() {
         </button>
       </header>
 
-      {/* 2. CUERPO PRINCIPAL */}
       <div className="admin-layout-clean">
         
         {/* BARRA LATERAL */}
@@ -232,12 +227,11 @@ export default function BarberDashboard() {
           </div>
         </div>
 
-        {/* CONTENIDO DERECHO */}
+        {/* PANEL DERECHO */}
         <div>
           {activeTab === 'schedule' ? (
             <div className="client-calendar-card">
               
-              {/* Encabezado del mes con navegación */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <div>
                   <span className="cal-eyebrow">ALMANAQUE GENERAL</span>
@@ -255,18 +249,16 @@ export default function BarberDashboard() {
                 </div>
               </div>
 
-              {/* CALENDARIO DE DOMINGO A SÁBADO (CON CELDAS COMPENSADAS) */}
+              {/* CALENDARIO DOMINGO A SÁBADO */}
               <div className="cal-week-labels">
                 <span>DOM</span><span>LUN</span><span>MAR</span><span>MIE</span><span>JUE</span><span>VIE</span><span>SAB</span>
               </div>
 
               <div className="cal-days-grid" style={{ marginBottom: 20 }}>
-                {/* 1. Celdas vacías */}
                 {emptyOffset.map((_, i) => (
                   <div key={`offset-${i}`} className="cal-cell cell-disabled" style={{ opacity: 0.15, minHeight: 64 }}></div>
                 ))}
 
-                {/* 2. Días reales del mes */}
                 {monthDays.map(d => (
                   <div
                     key={d.dateStr}
@@ -287,7 +279,7 @@ export default function BarberDashboard() {
                 ))}
               </div>
 
-              {/* Barra de estado del día seleccionado */}
+              {/* BARRA DE HERRAMIENTAS */}
               <div style={{ background: '#f8fafc', padding: '14px 18px', borderRadius: 14, border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <b>Horas para: {new Date(selectedDate + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })}</b>
                 
@@ -307,7 +299,7 @@ export default function BarberDashboard() {
                 <div style={{ background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: 14, padding: 30, textAlign: 'center', color: '#dc2626' }}>
                   <ShieldAlert size={40} style={{ margin: '0 auto 10px' }} />
                   <b style={{ fontSize: 16, display: 'block' }}>Este día se encuentra cerrado por completo</b>
-                  <p style={{ fontSize: 13, color: '#7f1d1d', marginTop: 4 }}>Ningún cliente podrá reservar turnos en esta fecha.</p>
+                  <p style={{ fontSize: 13, color: '#7f1d1d', marginTop: 4 }}>Ningún cliente podrá agendar citas en esta fecha.</p>
                 </div>
               ) : (
                 <div className="master-slots-container">
@@ -315,8 +307,13 @@ export default function BarberDashboard() {
                     const apt = appointments.find(a => a.startsAt.startsWith(selectedDate) && getHour(a.startsAt) === h && a.status === 'CONFIRMED');
                     const blk = blocks.find(b => b.startsAt.startsWith(selectedDate) && getHour(b.startsAt) === h);
                     
-                    // Verificar si en este día de la semana hay un VIP recurrente fijo a esta hora
-                    const vipSlot = vips.find(v => v.weekday === selectedDateDayOfWeek && v.time === h);
+                    // Verificar si en este día de la semana hay un VIP recurrente fijo
+                    // Si tiene excepción para esta fecha, NO SE MUESTRA como bloqueado
+                    const vipSlot = vips.find(v => {
+                      if (v.weekday !== selectedDateDayOfWeek || v.time !== h) return false;
+                      const hasException = v.exceptions?.some((e: any) => new Date(e.date).toISOString().split('T')[0] === selectedDate);
+                      return !hasException;
+                    });
 
                     if (apt) {
                       return (
@@ -387,7 +384,7 @@ export default function BarberDashboard() {
               )}
             </div>
           ) : (
-            /* PESTAÑA CLIENTES VIP */
+            /* PESTAÑA VIPs */
             <div className="client-calendar-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <div>
@@ -428,7 +425,7 @@ export default function BarberDashboard() {
 
       </div>
 
-      {/* MODAL BLOQUEAR HORA INDIVIDUAL */}
+      {/* MODAL BLOQUEAR HORA */}
       {blockModalOpen && (
         <div className="modal-hours-overlay">
           <div className="modal-hours-box" style={{ maxWidth: 440 }}>
@@ -446,7 +443,7 @@ export default function BarberDashboard() {
         </div>
       )}
 
-      {/* MODAL CERRAR DÍA COMPLETO (CON CONFIRMACIÓN ASYS) */}
+      {/* MODAL CERRAR DÍA COMPLETO */}
       {blockDayModal && (
         <div className="modal-hours-overlay">
           <div className="modal-hours-box" style={{ maxWidth: 430, textAlign: 'center' }}>
@@ -465,7 +462,7 @@ export default function BarberDashboard() {
         </div>
       )}
 
-      {/* MODAL ASIGNAR CLIENTE VIP (CON SELECTOR DE HORAS Y CLIENTES REALES) */}
+      {/* MODAL ASIGNAR CLIENTE VIP */}
       {vipModalOpen && (
         <div className="modal-hours-overlay">
           <div className="modal-hours-box" style={{ maxWidth: 460 }}>
@@ -499,9 +496,9 @@ export default function BarberDashboard() {
               <option value={4}>Jueves</option>
               <option value={5}>Viernes</option>
               <option value={6}>Sábado</option>
+              <option value={0}>Domingo</option>
             </select>
 
-            {/* SELECTOR DESPLEGABLE DE HORAS (NO PERMITE ESCRIBIR A MANO) */}
             <label className="input-label">Hora Fija Semanal</label>
             <select
               value={newVipTime}
@@ -521,7 +518,7 @@ export default function BarberDashboard() {
         </div>
       )}
 
-      {/* MODAL CONFIRMAR CANCELAR CITA */}
+      {/* MODAL CANCELAR CITA */}
       {confirmModal && confirmModal.open && (
         <div className="modal-hours-overlay">
           <div className="modal-hours-box" style={{ maxWidth: 420, textAlign: 'center' }}>

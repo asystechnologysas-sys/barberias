@@ -19,13 +19,11 @@ export default function PublicBooking() {
   const [freeHours, setFreeHours] = useState<string[]>([]);
   const [loadingHours, setLoadingHours] = useState(false);
 
-  // Horario VIP dinámico y real
+  // MODO REPROGRAMACIÓN VIP SOBRE EL ALMANAQUE NORMAL
+  const [isReschedulingVip, setIsReschedulingVip] = useState(false);
   const [myVipData, setMyVipData] = useState<any>(null);
-  const [showVipModal, setShowVipModal] = useState(false);
-  const [rescheduleDate, setRescheduleDate] = useState('');
-  const [rescheduleTime, setRescheduleTime] = useState('11:00');
 
-  // Ventana de Alerta ASYS (Sustituye alert() del navegador)
+  // Modal de alertas ASYS (Cero alertas nativas)
   const [alertModal, setAlertModal] = useState<{ open: boolean; title: string; message: string; type: 'info' | 'success' | 'error' } | null>(null);
 
   const token = localStorage.getItem('asys_token');
@@ -40,7 +38,6 @@ export default function PublicBooking() {
   };
 
   useEffect(() => {
-    // 1. Cargar datos de la barbería
     api.get(`/api/public/${slug}`)
       .then(data => {
         setOrg(data);
@@ -50,7 +47,6 @@ export default function PublicBooking() {
       })
       .catch(() => setLoading(false));
 
-    // 2. Si está logueado, consultar su horario VIP real en la BD
     if (token) {
       api.get('/api/vip/my-schedule')
         .then(vip => setMyVipData(vip))
@@ -58,7 +54,7 @@ export default function PublicBooking() {
     }
   }, [slug, token]);
 
-  // CALENDARIO DOMINGO A SÁBADO CON DÍAS REALMENTE CERRADOS
+  // CÁLCULO DEL CALENDARIO CON DOMINGO A SÁBADO
   const today = new Date();
   const year = today.getFullYear();
   const month = today.getMonth();
@@ -72,9 +68,8 @@ export default function PublicBooking() {
     const dateStr = d.toISOString().split('T')[0];
     const diffDays = Math.floor((d.getTime() - new Date(today.toDateString()).getTime()) / (1000 * 60 * 60 * 24));
     const inRange = diffDays >= 0 && diffDays <= 7;
-    const isSunday = d.getDay() === 0;
 
-    // Verificar si el día está bloqueado por el barbero en la base de datos
+    // Verificar si el día está cerrado en PostgreSQL (Día 22 u otros bloqueos)
     const isDayClosedInDb = org?.blockedSlots?.some((b: any) => {
       const bStart = new Date(b.startsAt);
       const bEnd = new Date(b.endsAt);
@@ -84,8 +79,7 @@ export default function PublicBooking() {
     return {
       dayNum: i + 1,
       dateStr,
-      inRange: inRange && !isSunday && !isDayClosedInDb,
-      isSunday,
+      inRange: inRange && !isDayClosedInDb,
       isDayClosedInDb
     };
   });
@@ -117,53 +111,50 @@ export default function PublicBooking() {
     setShowHoursModal(false);
   };
 
-  const handleConfirmAppointment = async () => {
+  // Confirmar Cita Normal o Confirmar Reprogramación VIP
+  const handleConfirmAction = async () => {
     if (!token) {
-      showAlert('Acceso Requerido', 'Por favor inicia sesión con tu celular para registrar tu turno.', 'info');
+      showAlert('Acceso Requerido', 'Por favor inicia sesión para registrar tu turno.', 'info');
       navigate('/login');
       return;
     }
 
-    try {
-      const startsAt = new Date(`${selectedDate}T${selectedTime}:00-05:00`);
-      await api.post('/api/appointments', {
-        serviceId: selectedService.id,
-        barberId: selectedBarber || undefined,
-        startsAt
-      });
-      showAlert('¡Cita Confirmada!', `Tu turno quedó reservado para el ${selectedDate} a las ${selectedTime}.`, 'success');
-    } catch (err: any) {
-      showAlert('No se pudo agendar', err.message || 'Error al confirmar la cita', 'error');
-    }
-  };
+    if (isReschedulingVip) {
+      // ACCIÓN REPROGRAMAR TURNO VIP
+      try {
+        const origDate = new Date();
+        origDate.setDate(origDate.getDate() + ((myVipData.weekday + 7 - origDate.getDay()) % 7));
+        const originalDateStr = origDate.toISOString().split('T')[0];
 
-  // REPROGRAMAR TURNO VIP SOLO POR ESTA SEMANA
-  const handleConfirmVipReschedule = async () => {
-    if (!rescheduleDate || !rescheduleTime) {
-      return showAlert('Campos requeridos', 'Selecciona el nuevo día y la hora para mover tu turno.', 'error');
-    }
+        await api.post('/api/vip/reschedule-week', {
+          vipId: myVipData.id,
+          originalDateStr,
+          newDateStr: selectedDate,
+          newTime: selectedTime
+        });
 
-    try {
-      // Calcular fecha original del sábado/día VIP de esta semana
-      const origDate = new Date();
-      origDate.setDate(origDate.getDate() + ((myVipData.weekday + 7 - origDate.getDay()) % 7));
-      const originalDateStr = origDate.toISOString().split('T')[0];
-
-      await api.post('/api/vip/reschedule-week', {
-        vipId: myVipData.id,
-        originalDateStr,
-        newDateStr: rescheduleDate,
-        newTime: rescheduleTime
-      });
-
-      setShowVipModal(false);
-      showAlert(
-        '¡Turno VIP Reprogramado!',
-        `Tu hora habitual del ${weekdayNames[myVipData.weekday]} ha sido liberada para esta semana y tu nuevo turno quedó para el ${rescheduleDate} a las ${rescheduleTime}.`,
-        'success'
-      );
-    } catch (err: any) {
-      showAlert('Error al reprogramar', err.message || 'No se pudo mover el turno VIP', 'error');
+        setIsReschedulingVip(false);
+        showAlert(
+          '¡Turno VIP Modificado!',
+          `Tu turno habitual del ${weekdayNames[myVipData.weekday]} ha sido liberado para esta semana. Tu nuevo turno es el ${selectedDate} a las ${selectedTime}.`,
+          'success'
+        );
+      } catch (err: any) {
+        showAlert('Error al reprogramar', err.message || 'No se pudo mover el turno VIP', 'error');
+      }
+    } else {
+      // ACCIÓN RESERVA NORMAL
+      try {
+        const startsAt = new Date(`${selectedDate}T${selectedTime}:00-05:00`);
+        await api.post('/api/appointments', {
+          serviceId: selectedService.id,
+          barberId: selectedBarber || undefined,
+          startsAt
+        });
+        showAlert('¡Cita Confirmada!', `Tu turno quedó reservado para el ${selectedDate} a las ${selectedTime}.`, 'success');
+      } catch (err: any) {
+        showAlert('No se pudo agendar', err.message || 'Error al confirmar la cita', 'error');
+      }
     }
   };
 
@@ -216,11 +207,11 @@ export default function PublicBooking() {
         </div>
       </header>
 
-      {/* 2. CONTENIDO */}
+      {/* 2. CUERPO */}
       <div className="client-content-container">
         
-        {/* BANNER VIP DINÁMICO (Muestra la hora real de este VIP) */}
-        {myVipData && (
+        {/* BANNER VIP DINÁMICO */}
+        {myVipData && !isReschedulingVip && (
           <div style={{ background: '#fffdf5', border: '1.5px solid #fde68a', borderRadius: 18, padding: '18px 24px', marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, boxShadow: '0 4px 15px rgba(217, 119, 6, 0.06)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
               <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#fef3c7', display: 'grid', placeItems: 'center' }}>
@@ -235,7 +226,11 @@ export default function PublicBooking() {
             </div>
 
             <button
-              onClick={() => setShowVipModal(true)}
+              onClick={() => {
+                setIsReschedulingVip(true);
+                setSelectedDate('');
+                setSelectedTime('');
+              }}
               className="btn-vip-reschedule"
             >
               <RefreshCw size={15} /> Cambiar Turno Esta Semana
@@ -243,28 +238,24 @@ export default function PublicBooking() {
           </div>
         )}
 
-        {/* Selector de Servicios */}
-        {org.services?.length > 1 && (
-          <div style={{ display: 'flex', gap: 8, marginBottom: 20, overflowX: 'auto', paddingBottom: 6 }}>
-            {org.services.map((svc: any) => (
-              <button
-                key={svc.id}
-                onClick={() => setSelectedService(svc)}
-                className="clean-tab-btn"
-                style={{
-                  background: selectedService?.id === svc.id ? '#1554ff' : '#ffffff',
-                  color: selectedService?.id === svc.id ? '#ffffff' : '#0b1020',
-                  border: '1.5px solid #e2e8f0',
-                  borderRadius: 30,
-                  padding: '8px 18px',
-                  fontWeight: 700,
-                  whiteSpace: 'nowrap',
-                  fontSize: 13
-                }}
-              >
-                {svc.name} · ${Number(svc.price).toLocaleString('es-CO')}
-              </button>
-            ))}
+        {/* AVISO MODO REPROGRAMACIÓN VIP ACTIVO */}
+        {isReschedulingVip && (
+          <div style={{ background: '#eff6ff', border: '1.5px solid #93c5fd', borderRadius: 16, padding: '16px 22px', marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <RefreshCw size={24} color="#1554ff" className="animate-spin" />
+              <div>
+                <b style={{ color: '#1e3a8a', fontSize: 15, display: 'block' }}>Modo Reprogramación VIP Activo</b>
+                <span style={{ color: '#1d4ed8', fontSize: 13 }}>
+                  Selecciona en el calendario un día y hora disponible para mover tu turno fijo de esta semana. Tu hora habitual se liberará de inmediato.
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => setIsReschedulingVip(false)}
+              className="btn-logout-modern"
+            >
+              Cancelar
+            </button>
           </div>
         )}
 
@@ -274,7 +265,7 @@ export default function PublicBooking() {
           <div className="client-calendar-card">
             <div className="cal-header-bar">
               <div>
-                <span className="cal-eyebrow">AGENDA ONLINE</span>
+                <span className="cal-eyebrow">{isReschedulingVip ? 'REPROGRAMAR TURNO VIP' : 'AGENDA ONLINE'}</span>
                 <h2 className="cal-month-title">Septiembre 2026</h2>
               </div>
               <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Próximos 7 días hábiles</span>
@@ -291,7 +282,7 @@ export default function PublicBooking() {
 
               {currentMonthDays.map((d, index) => {
                 const isSelected = selectedDate === d.dateStr;
-                const isClosed = d.isSunday || d.isDayClosedInDb;
+                const isClosed = d.isDayClosedInDb;
 
                 return (
                   <div
@@ -318,7 +309,9 @@ export default function PublicBooking() {
           {/* Resumen lateral */}
           <div className="client-sidebar">
             <div className="client-summary-card">
-              <h3 style={{ fontSize: 18, fontFamily: 'Sora', marginBottom: 16 }}>Resumen de tu Turno</h3>
+              <h3 style={{ fontSize: 18, fontFamily: 'Sora', marginBottom: 16 }}>
+                {isReschedulingVip ? 'Confirmar Reprogramación VIP' : 'Resumen de tu Turno'}
+              </h3>
 
               <div className="client-summary-row">
                 <span>Servicio</span>
@@ -326,43 +319,44 @@ export default function PublicBooking() {
               </div>
 
               <div className="client-summary-row">
-                <span>Fecha</span>
+                <span>Fecha Nueva</span>
                 <b>{selectedDate || 'Elige en el calendario'}</b>
               </div>
 
               <div className="client-summary-row">
-                <span>Hora</span>
+                <span>Hora Nueva</span>
                 <b>{selectedTime || 'Sin seleccionar'}</b>
               </div>
 
               <div className="client-summary-row">
                 <span>Total a pagar</span>
                 <span className="client-summary-total">
-                  ${selectedService ? Number(selectedService.price).toLocaleString('es-CO') : '25.000'}
+                  {isReschedulingVip ? '$0 (Turno VIP)' : `$${selectedService ? Number(selectedService.price).toLocaleString('es-CO') : '25.000'}`}
                 </span>
               </div>
 
               <div style={{ marginTop: 20 }}>
                 <button
-                  onClick={handleConfirmAppointment}
+                  onClick={handleConfirmAction}
                   disabled={!selectedDate || !selectedTime}
                   className="btn-clean-submit"
+                  style={isReschedulingVip ? { background: 'linear-gradient(135deg, #d97706, #f59e0b)', color: '#0b1020' } : {}}
                 >
-                  Confirmar cita →
+                  {isReschedulingVip ? 'Confirmar Cambio de Turno VIP →' : 'Confirmar cita →'}
                 </button>
               </div>
             </div>
 
             <div className="client-wa-card">
               <h4>📱 Recordatorios por WhatsApp</h4>
-              <p>Al confirmar tu cita, el sistema te enviará una notificación con la fecha, hora y servicio agendado sin costo adicional.</p>
+              <p>El sistema te notificará en tiempo real sobre confirmaciones o reprogramaciones de turno.</p>
             </div>
           </div>
 
         </div>
       </div>
 
-      {/* MODAL FLOTANTE DE HORAS DISPONIBLES */}
+      {/* MODAL DE HORARIOS FLOTANTE */}
       {showHoursModal && (
         <div className="modal-hours-overlay">
           <div className="modal-hours-box">
@@ -408,50 +402,7 @@ export default function PublicBooking() {
         </div>
       )}
 
-      {/* MODAL DE REPROGRAMAR TURNO VIP ESTA SEMANA */}
-      {showVipModal && (
-        <div className="modal-hours-overlay">
-          <div className="modal-hours-box" style={{ maxWidth: 460 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ fontFamily: 'Sora', fontSize: 18, color: '#92400e', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Crown size={20} color="#d97706" /> Mover Turno VIP Esta Semana
-              </h3>
-              <button onClick={() => setShowVipModal(false)} className="btn-logout-modern" style={{ padding: '4px 8px' }}><X size={16} /></button>
-            </div>
-
-            <p style={{ color: '#64748b', fontSize: 13, lineHeight: 1.5, marginBottom: 18 }}>
-              Al mover tu turno, tu horario habitual del <b>{weekdayNames[myVipData?.weekday]} a las {myVipData?.time}</b> se liberará solo para esta semana, y quedarás agendado en la nueva fecha que elijas.
-            </p>
-
-            <label className="input-label">Selecciona la Nueva Fecha</label>
-            <input
-              type="date"
-              value={rescheduleDate}
-              onChange={e => setRescheduleDate(e.target.value)}
-              className="clean-input"
-              style={{ marginBottom: 14 }}
-            />
-
-            <label className="input-label">Selecciona la Nueva Hora</label>
-            <select
-              value={rescheduleTime}
-              onChange={e => setRescheduleTime(e.target.value)}
-              className="clean-input"
-              style={{ marginBottom: 22 }}
-            >
-              {masterDayHours.map(h => (
-                <option key={h} value={h}>{h}</option>
-              ))}
-            </select>
-
-            <button onClick={handleConfirmVipReschedule} className="btn-vip-reschedule" style={{ width: '100%', justifyContent: 'center' }}>
-              Confirmar Cambio de Turno VIP
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL DE ALERTAS FLOTANTES ASYS (Cero popups nativos) */}
+      {/* MODAL DE ALERTAS FLOTANTES ASYS */}
       {alertModal && alertModal.open && (
         <div className="modal-hours-overlay">
           <div className="asys-alert-modal">
