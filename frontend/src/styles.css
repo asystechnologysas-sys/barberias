@@ -109,13 +109,25 @@ h1, h2, h3, b, .font-sora {
   border-radius: 20px;
 }
 
-/* LADO DERECHO: Formulario Limpio Fondo Blanco */
+/* Transición suave del lado derecho */
 .login-form-side {
-  background: #ffffff;
+  background: #f8fafc;
+  background-image: radial-gradient(at 100% 0%, rgba(21, 84, 255, 0.05) 0px, transparent 50%);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 40px 24px;
+}
+
+/* Tarjeta flotante blanca integrada (elimina el choque seco) */
+.login-card-floating {
+  width: 100%;
+  max-width: 440px;
+  background: #ffffff;
+  padding: 40px 36px;
+  border-radius: 20px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(226, 232, 240, 0.6);
 }
 
 .login-card-box {
@@ -290,12 +302,13 @@ h1, h2, h3, b, .font-sora {
   .login-visual-side { display: none; }
 }
 
+/* Logo circular limpio */
 .app-brand-avatar {
   width: 48px;
   height: 48px;
   border-radius: 50%;
   object-fit: cover;
   display: block;
-  border: 1.5px solid var(--border-light);
-  box-shadow: 0 4px 12px rgba(21, 84, 255, 0.15);
+  border: 2px solid #ffffff;
+  box-shadow: 0 4px 14px rgba(21, 84, 255, 0.18);
 }

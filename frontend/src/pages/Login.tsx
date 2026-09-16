@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import logoAsys from './logoAsys.png'; // <-- Importación directa y segura
 
 export default function Login() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<'login' | 'register'>('login');
   
-  // Campos del formulario
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -54,7 +54,7 @@ export default function Login() {
   return (
     <div className="login-split-container">
       
-      {/* LADO IZQUIERDO: Estilo Barbería */}
+      {/* LADO IZQUIERDO: Fotografía con atmósfera */}
       <div className="login-visual-side">
         <div className="badge-brand-chip">
           ⚡ ASYS BARBER SOFTWARE
@@ -76,14 +76,14 @@ export default function Login() {
         </div>
       </div>
 
-      {/* LADO DERECHO: Formulario Blanco */}
+      {/* LADO DERECHO: Tarjeta Flotante sobre fondo armónico */}
       <div className="login-form-side">
-        <div className="login-card-box">
+        <div className="login-card-floating">
           
-          {/* Logo ASYS con border-radius 50% */}
+          {/* Logo ASYS como imagen importada */}
           <div className="app-brand-header">
             <img
-              src="/logoASYS.png"
+              src={logoAsys}
               alt="ASYS Barber"
               className="app-brand-avatar"
             />
@@ -100,7 +100,7 @@ export default function Login() {
               className={`clean-tab-btn ${tab === 'login' ? 'active' : ''}`}
               onClick={() => { setTab('login'); setErrorMsg(''); }}
             >
-              Entrar
+              Iniciar Sesión
             </button>
             <button
               type="button"
@@ -171,13 +171,13 @@ export default function Login() {
             </div>
 
             <button type="submit" disabled={loading} className="btn-clean-submit">
-              {loading ? 'Entrando...' : tab === 'login' ? 'Iniciar Sesión →' : 'Crear Cuenta y Agendar →'}
+              {loading ? 'Accediendo...' : tab === 'login' ? 'Iniciar Sesión →' : 'Crear Cuenta y Agendar →'}
             </button>
           </form>
 
           <div className="clean-note-box">
-            <b>Acceso Unificado</b>
-            Clientes, barberos y administradores acceden desde este panel con su cuenta correspondiente.
+            <b>Acceso a la plataforma</b>
+            Clientes, barberos y administradores acceden según los permisos de su cuenta.
           </div>
 
         </div>
