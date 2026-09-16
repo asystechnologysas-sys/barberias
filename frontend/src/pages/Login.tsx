@@ -7,11 +7,10 @@ export default function Login() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<'login' | 'register'>('login');
   
-  // Campos sin correo para registro
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
-  const [loginUser, setLoginUser] = useState(''); // Celular o correo para login
+  const [loginUser, setLoginUser] = useState('');
   
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
@@ -20,6 +19,10 @@ export default function Login() {
     e.preventDefault();
     setErrorMsg('');
     setLoading(true);
+
+    // Limpieza obligatoria antes de crear o iniciar sesión
+    localStorage.removeItem('asys_token');
+    localStorage.removeItem('asys_user');
 
     try {
       if (tab === 'login') {
@@ -175,7 +178,7 @@ export default function Login() {
 
           <div className="clean-note-box">
             <b>Acceso a la plataforma</b>
-            Clientes, barberos y dueños acceden desde aquí según sus permisos.
+            Clientes, barberos y dueños acceden según los permisos de su cuenta.
           </div>
         </div>
       </div>

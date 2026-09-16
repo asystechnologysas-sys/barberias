@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { X, CheckCircle2, LogOut, Crown, AlertCircle, RefreshCw, Sparkles } from 'lucide-react';
+import { X, CheckCircle2, LogOut, Crown, AlertCircle, RefreshCw, Sparkles, Calendar as CalIcon } from 'lucide-react';
 import { api } from '../api';
 
 export default function PublicBooking() {
@@ -19,7 +19,10 @@ export default function PublicBooking() {
   const [freeHours, setFreeHours] = useState<string[]>([]);
   const [loadingHours, setLoadingHours] = useState(false);
 
-  // MODO REPROGRAMACIÓN VIP SOBRE EL ALMANAQUE NORMAL
+  // Citas futuras del cliente
+  const [myUpcomingAppointments, setMyUpcomingAppointments] = useState<any[]>([]);
+
+  // Modo reprogramación VIP sobre el almanaque
   const [isReschedulingVip, setIsReschedulingVip] = useState(false);
   const [myVipData, setMyVipData] = useState<any>(null);
 
@@ -38,6 +41,7 @@ export default function PublicBooking() {
   };
 
   useEffect(() => {
+    // Cargar barbería
     api.get(`/api/public/${slug}`)
       .then(data => {
         setOrg(data);
@@ -47,14 +51,23 @@ export default function PublicBooking() {
       })
       .catch(() => setLoading(false));
 
+    // Si está autenticado, cargar su horario VIP real y sus citas futuras
     if (token) {
       api.get('/api/vip/my-schedule')
         .then(vip => setMyVipData(vip))
         .catch(() => setMyVipData(null));
+
+      api.get('/api/appointments')
+        .then(apts => {
+          const now = new Date();
+          const futures = apts.filter((a: any) => new Date(a.startsAt) >= now && a.status === 'CONFIRMED');
+          setMyUpcomingAppointments(futures);
+        })
+        .catch(() => setMyUpcomingAppointments([]));
     }
   }, [slug, token]);
 
-  // CÁLCULO DEL CALENDARIO CON DOMINGO A SÁBADO
+  // CALENDARIO DOMINGO A SÁBADO
   const today = new Date();
   const year = today.getFullYear();
   const month = today.getMonth();
@@ -69,7 +82,6 @@ export default function PublicBooking() {
     const diffDays = Math.floor((d.getTime() - new Date(today.toDateString()).getTime()) / (1000 * 60 * 60 * 24));
     const inRange = diffDays >= 0 && diffDays <= 7;
 
-    // Verificar si el día está cerrado en PostgreSQL (Día 22 u otros bloqueos)
     const isDayClosedInDb = org?.blockedSlots?.some((b: any) => {
       const bStart = new Date(b.startsAt);
       const bEnd = new Date(b.endsAt);
@@ -111,7 +123,6 @@ export default function PublicBooking() {
     setShowHoursModal(false);
   };
 
-  // Confirmar Cita Normal o Confirmar Reprogramación VIP
   const handleConfirmAction = async () => {
     if (!token) {
       showAlert('Acceso Requerido', 'Por favor inicia sesión para registrar tu turno.', 'info');
@@ -120,7 +131,6 @@ export default function PublicBooking() {
     }
 
     if (isReschedulingVip) {
-      // ACCIÓN REPROGRAMAR TURNO VIP
       try {
         const origDate = new Date();
         origDate.setDate(origDate.getDate() + ((myVipData.weekday + 7 - origDate.getDay()) % 7));
@@ -143,7 +153,6 @@ export default function PublicBooking() {
         showAlert('Error al reprogramar', err.message || 'No se pudo mover el turno VIP', 'error');
       }
     } else {
-      // ACCIÓN RESERVA NORMAL
       try {
         const startsAt = new Date(`${selectedDate}T${selectedTime}:00-05:00`);
         await api.post('/api/appointments', {
@@ -158,9 +167,19 @@ export default function PublicBooking() {
     }
   };
 
+  const handleCancelMyAppointment = async (id: string) => {
+    try {
+      await api.patch(`/api/appointments/${id}/cancel`, {});
+      showAlert('Cita Cancelada', 'Tu cita ha sido cancelada exitosamente.', 'success');
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo cancelar', 'error');
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('asys_token');
     localStorage.removeItem('asys_user');
+    api.post('/api/auth/logout', {}).catch(() => {});
     navigate('/login');
   };
 
@@ -238,7 +257,33 @@ export default function PublicBooking() {
           </div>
         )}
 
-        {/* AVISO MODO REPROGRAMACIÓN VIP ACTIVO */}
+        {/* PRÓXIMAS CITAS DEL CLIENTE */}
+        {myUpcomingAppointments.length > 0 && (
+          <div className="upcoming-appointments-box">
+            <b style={{ color: '#1e3a8a', fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <CalIcon size={18} color="#1554ff" /> Tus Próximas Citas Agendadas
+            </b>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+              {myUpcomingAppointments.map(apt => (
+                <div key={apt.id} className="upcoming-apt-card">
+                  <div>
+                    <b style={{ fontSize: 14, color: '#0b1020' }}>
+                      {new Date(apt.startsAt).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })}
+                    </b>
+                    <span style={{ display: 'block', fontSize: 13, color: '#64748b', marginTop: 2 }}>
+                      Hora: {new Date(apt.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {apt.service?.name} (${Number(apt.price).toLocaleString('es-CO')}) · Barbero: {apt.barber?.displayName || 'Asignado'}
+                    </span>
+                  </div>
+                  <button onClick={() => handleCancelMyAppointment(apt.id)} className="btn-action-sm btn-cancel">
+                    Cancelar Cita
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* MODO REPROGRAMACIÓN ACTIVO */}
         {isReschedulingVip && (
           <div style={{ background: '#eff6ff', border: '1.5px solid #93c5fd', borderRadius: 16, padding: '16px 22px', marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -250,10 +295,7 @@ export default function PublicBooking() {
                 </span>
               </div>
             </div>
-            <button
-              onClick={() => setIsReschedulingVip(false)}
-              className="btn-logout-modern"
-            >
+            <button onClick={() => setIsReschedulingVip(false)} className="btn-logout-modern">
               Cancelar
             </button>
           </div>

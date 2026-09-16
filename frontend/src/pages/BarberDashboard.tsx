@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Users, LogOut, Lock, Unlock, X, ChevronLeft, ChevronRight, AlertTriangle, ShieldAlert, Crown } from 'lucide-react';
+import { Calendar, Users, LogOut, Lock, Unlock, X, ChevronLeft, ChevronRight, AlertTriangle, ShieldAlert, Crown, Phone, MessageSquare } from 'lucide-react';
 import { api } from '../api';
 
 export default function BarberDashboard() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'schedule' | 'vips'>('schedule');
+  const [activeTab, setActiveTab] = useState<'schedule' | 'vips' | 'clients'>('schedule');
 
   const userStr = localStorage.getItem('asys_user');
   const currentUser = userStr ? JSON.parse(userStr) : null;
@@ -162,6 +162,7 @@ export default function BarberDashboard() {
   const handleLogout = () => {
     localStorage.removeItem('asys_token');
     localStorage.removeItem('asys_user');
+    api.post('/api/auth/logout', {}).catch(() => {});
     navigate('/login');
   };
 
@@ -222,16 +223,18 @@ export default function BarberDashboard() {
               <Calendar size={16} /> Almanaque Máster
             </button>
             <button onClick={() => setActiveTab('vips')} className={`admin-nav-btn ${activeTab === 'vips' ? 'active' : ''}`}>
-              <Users size={16} /> Clientes VIP Recurrentes
+              <Crown size={16} /> Clientes VIP
+            </button>
+            <button onClick={() => setActiveTab('clients')} className={`admin-nav-btn ${activeTab === 'clients' ? 'active' : ''}`}>
+              <Users size={16} /> Mis Clientes
             </button>
           </div>
         </div>
 
         {/* PANEL DERECHO */}
         <div>
-          {activeTab === 'schedule' ? (
+          {activeTab === 'schedule' && (
             <div className="client-calendar-card">
-              
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <div>
                   <span className="cal-eyebrow">ALMANAQUE GENERAL</span>
@@ -249,7 +252,7 @@ export default function BarberDashboard() {
                 </div>
               </div>
 
-              {/* CALENDARIO DOMINGO A SÁBADO */}
+              {/* CALENDARIO */}
               <div className="cal-week-labels">
                 <span>DOM</span><span>LUN</span><span>MAR</span><span>MIE</span><span>JUE</span><span>VIE</span><span>SAB</span>
               </div>
@@ -307,8 +310,7 @@ export default function BarberDashboard() {
                     const apt = appointments.find(a => a.startsAt.startsWith(selectedDate) && getHour(a.startsAt) === h && a.status === 'CONFIRMED');
                     const blk = blocks.find(b => b.startsAt.startsWith(selectedDate) && getHour(b.startsAt) === h);
                     
-                    // Verificar si en este día de la semana hay un VIP recurrente fijo
-                    // Si tiene excepción para esta fecha, NO SE MUESTRA como bloqueado
+                    // Si el VIP reprogramó para otra fecha, aquí no sale
                     const vipSlot = vips.find(v => {
                       if (v.weekday !== selectedDateDayOfWeek || v.time !== h) return false;
                       const hasException = v.exceptions?.some((e: any) => new Date(e.date).toISOString().split('T')[0] === selectedDate);
@@ -383,8 +385,10 @@ export default function BarberDashboard() {
                 </div>
               )}
             </div>
-          ) : (
-            /* PESTAÑA VIPs */
+          )}
+
+          {/* PESTAÑA VIPs */}
+          {activeTab === 'vips' && (
             <div className="client-calendar-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <div>
@@ -421,6 +425,61 @@ export default function BarberDashboard() {
               </div>
             </div>
           )}
+
+          {/* PESTAÑA 3: MIS CLIENTES CON WHATSAPP */}
+          {activeTab === 'clients' && (
+            <div className="client-calendar-card">
+              <span className="cal-eyebrow">DIRECTORIO</span>
+              <h2 style={{ fontFamily: 'Sora', fontSize: 22, marginBottom: 20 }}>Clientes de la Barbería</h2>
+
+              <table className="super-table">
+                <thead>
+                  <tr>
+                    <th>Cliente</th>
+                    <th>Celular</th>
+                    <th>Citas Realizadas</th>
+                    <th>Tipo</th>
+                    <th>Chat Directo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clientList.length === 0 ? (
+                    <tr><td colSpan={5} style={{ textAlign: 'center', padding: 30, color: '#64748b' }}>No hay clientes registrados aún.</td></tr>
+                  ) : (
+                    clientList.map(c => {
+                      const cleanPhone = c.phone?.replace(/[^0-9]/g, '');
+                      const fullPhone = cleanPhone?.startsWith('57') ? cleanPhone : `57${cleanPhone}`;
+                      const waUrl = `https://wa.me/${fullPhone}?text=${encodeURIComponent(`Hola ${c.name}, te escribimos de ${currentUser?.name || 'la barbería'}`)}`;
+                      const isVip = c.vipSchedules?.length > 0;
+
+                      return (
+                        <tr key={c.id}>
+                          <td><b>{c.name}</b></td>
+                          <td>{c.phone}</td>
+                          <td><b>{c._count?.appointments || 0} cita(s)</b></td>
+                          <td>
+                            {isVip ? (
+                              <span style={{ color: '#d97706', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                <Crown size={14} color="#f59e0b" /> VIP
+                              </span>
+                            ) : (
+                              <span style={{ color: '#64748b' }}>Cliente Regular</span>
+                            )}
+                          </td>
+                          <td>
+                            <a href={waUrl} target="_blank" rel="noopener noreferrer" className="btn-whatsapp-chat">
+                              <MessageSquare size={13} /> Enviar WhatsApp
+                            </a>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
         </div>
 
       </div>

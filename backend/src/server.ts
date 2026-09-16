@@ -31,8 +31,9 @@ function tokenFor(user: { id: string; role: Role; organizationId: string | null 
   return jwt.sign({ sub: user.id, role: user.role, organizationId: user.organizationId }, JWT_SECRET, { expiresIn: '8h' });
 }
 
+// Autenticación blindada: Prioridad absoluta al Bearer Token
 function auth(req: Request, res: Response, next: NextFunction) {
-  const token = req.cookies.access_token || req.headers.authorization?.replace(/^Bearer /, '');
+  const token = req.headers.authorization?.replace(/^Bearer /, '') || req.cookies.access_token;
   if (!token) return fail(res, 401, 'UNAUTHENTICATED', 'Inicia sesión para continuar.');
   try {
     const p = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
@@ -61,7 +62,7 @@ const toBogotaHour = (date: Date) => {
   return date.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
-// 1. HEALTH & PUBLIC TENANT
+// 1. HEALTH & PUBLIC
 app.get('/api/health', asyncRoute(async (_q, res) => {
   await db.$queryRaw`SELECT 1`;
   res.json({ status: 'ok' });
@@ -81,7 +82,7 @@ app.get('/api/public/:slug', asyncRoute(async (req, res) => {
   res.json({ success: true, data: org });
 }));
 
-// DISPONIBILIDAD REAL
+// Disponibilidad
 app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
   const dateStr = String(req.query.date);
   const org = await db.organization.findUnique({ where: { slug: String(req.params.slug) } });
@@ -92,7 +93,6 @@ app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
   const reqDate = new Date(`${dateStr}T12:00:00-05:00`);
   const dayOfWeek = reqDate.getDay();
 
-  // Revisar si todo el día está cerrado
   const fullDayBlock = await db.blockedSlot.findFirst({
     where: {
       organizationId: org.id,
@@ -105,34 +105,29 @@ app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
     return res.json({ success: true, data: [], isClosed: true });
   }
 
-  // Citas confirmadas
-  const appointments = await db.appointment.findMany({
-    where: {
-      organizationId: org.id,
-      status: AppointmentStatus.CONFIRMED,
-      startsAt: { gte: dayStart, lte: dayEnd }
-    }
-  });
-
-  // Bloqueos de horas específicas
-  const blocks = await db.blockedSlot.findMany({
-    where: {
-      organizationId: org.id,
-      startsAt: { gte: dayStart, lte: dayEnd }
-    }
-  });
-
-  // Turnos VIP recurrentes de este día
-  const vips = await db.vipSchedule.findMany({
-    where: {
-      organizationId: org.id,
-      weekday: dayOfWeek,
-      active: true
-    },
-    include: {
-      exceptions: true
-    }
-  });
+  const [appointments, blocks, vips] = await Promise.all([
+    db.appointment.findMany({
+      where: {
+        organizationId: org.id,
+        status: AppointmentStatus.CONFIRMED,
+        startsAt: { gte: dayStart, lte: dayEnd }
+      }
+    }),
+    db.blockedSlot.findMany({
+      where: {
+        organizationId: org.id,
+        startsAt: { gte: dayStart, lte: dayEnd }
+      }
+    }),
+    db.vipSchedule.findMany({
+      where: {
+        organizationId: org.id,
+        weekday: dayOfWeek,
+        active: true
+      },
+      include: { exceptions: true }
+    })
+  ]);
 
   const masterHours = ['09:00', '10:00', '11:00', '12:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
   const freeSlots: { time: string }[] = [];
@@ -141,7 +136,6 @@ app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
     const isBooked = appointments.some(a => toBogotaHour(a.startsAt) === h);
     const isBlocked = blocks.some(b => toBogotaHour(b.startsAt) === h);
 
-    // Revisar si hay un VIP fijo aquí, excepto si tiene excepción para este día
     const isVipLocked = vips.some(v => {
       if (v.time !== h) return false;
       const isSkippedThisDay = v.exceptions?.some(e => {
@@ -159,14 +153,12 @@ app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
   res.json({ success: true, data: freeSlots, isClosed: false });
 }));
 
-// 2. AUTH (Login y Registro)
+// 2. AUTHENTICATION (Limpio y sin arrastre de sesiones viejas)
 app.post('/api/auth/login', asyncRoute(async (req, res) => {
   const v = z.object({ email: z.string(), password: z.string().min(4) }).parse(req.body);
   
   const user = await db.user.findFirst({
-    where: {
-      OR: [{ email: v.email }, { phone: v.email }]
-    },
+    where: { OR: [{ email: v.email }, { phone: v.email }] },
     include: { organization: true, client: true }
   });
 
@@ -212,13 +204,12 @@ app.post('/api/auth/register', asyncRoute(async (req, res) => {
   const generatedEmail = `${cleanPhone.replace('+', '')}@cliente.local`;
   const passwordHash = await bcrypt.hash(v.password, 10);
 
-  // Evitar duplicados por teléfono
   const existingUser = await db.user.findFirst({
     where: { organizationId: org.id, phone: cleanPhone }
   });
 
   if (existingUser) {
-    return fail(res, 400, 'PHONE_EXISTS', 'Ya existe un usuario con este número de celular. Por favor inicia sesión.');
+    return fail(res, 400, 'PHONE_EXISTS', 'Ya existe una cuenta con este número de celular. Por favor inicia sesión.');
   }
 
   const user = await db.user.create({
@@ -242,16 +233,22 @@ app.post('/api/auth/register', asyncRoute(async (req, res) => {
   });
 
   const token = tokenFor(user);
-  res.status(201).json({
-    success: true,
-    data: {
-      token,
-      user: { id: user.id, name: user.name, phone: user.phone, role: user.role, organizationId: user.organizationId, isVip: false, vipInfo: null }
-    }
-  });
+  res.cookie('access_token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' })
+     .status(201)
+     .json({
+       success: true,
+       data: {
+         token,
+         user: { id: user.id, name: user.name, phone: user.phone, role: user.role, organizationId: user.organizationId, isVip: false, vipInfo: null }
+       }
+     });
 }));
 
-// 3. CITAS (Blindado contra errores de cliente y duplicados)
+app.post('/api/auth/logout', (_q, res) => {
+  res.clearCookie('access_token').json({ success: true });
+});
+
+// 3. CITAS (Filtrado por cliente para "Próximas Citas")
 app.post('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) => {
   try {
     const v = z.object({
@@ -262,13 +259,12 @@ app.post('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) =>
 
     const orgId = req.auth!.organizationId!;
     
-    // Obtener usuario autenticado
+    // Obtener usuario real autenticado
     const u = await db.user.findUniqueOrThrow({
       where: { id: req.auth!.id },
       include: { client: true }
     });
 
-    // Enlazar de forma segura con el cliente existente
     let client = u.client;
     if (!client) {
       client = await db.client.findFirst({ where: { userId: u.id } });
@@ -288,7 +284,7 @@ app.post('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) =>
       });
     }
 
-    // Regla de límite de citas: Máximo 2 para clientes normales, 3 para VIPs
+    // Regla de límite: normal máx 2 citas activas; VIP máx 3
     const now = new Date();
     const next7Days = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
     const isVip = await db.vipSchedule.findFirst({ where: { clientId: client.id, active: true } });
@@ -341,8 +337,17 @@ app.post('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) =>
 }));
 
 app.get('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) => {
+  const where: any = { organizationId: req.auth!.organizationId! };
+  
+  // Si es un cliente, mostrar ÚNICAMENTE sus propias citas
+  if (req.auth!.role === Role.CLIENT) {
+    const c = await db.client.findFirst({ where: { userId: req.auth!.id } });
+    if (!c) return res.json({ success: true, data: [] });
+    where.clientId = c.id;
+  }
+
   const appointments = await db.appointment.findMany({
-    where: { organizationId: req.auth!.organizationId! },
+    where,
     include: { service: true, barber: true },
     orderBy: { startsAt: 'asc' }
   });
@@ -439,10 +444,14 @@ app.delete('/api/blocks/:id', auth, activeTenant, asyncRoute(async (req, res) =>
   res.json({ success: true });
 }));
 
-// 5. CLIENTES Y MÓDULO VIP
+// 5. CLIENTES Y MÓDULO VIP (Con contador de citas para el directorio del barbero)
 app.get('/api/clients', auth, activeTenant, asyncRoute(async (req, res) => {
   const clients = await db.client.findMany({
     where: { organizationId: req.auth!.organizationId! },
+    include: {
+      _count: { select: { appointments: true } },
+      vipSchedules: { where: { active: true } }
+    },
     orderBy: { name: 'asc' }
   });
   res.json({ success: true, data: clients });
@@ -500,12 +509,12 @@ app.delete('/api/vip/:id', auth, activeTenant, asyncRoute(async (req, res) => {
   res.json({ success: true });
 }));
 
-// REPROGRAMAR TURNO VIP SOLO POR ESTA SEMANA (LIBERA EL ANTERIOR Y CREA CITA)
+// REPROGRAMAR TURNO VIP SOLO POR ESTA SEMANA
 app.post('/api/vip/reschedule-week', auth, activeTenant, asyncRoute(async (req, res) => {
   const { vipId, originalDateStr, newDateStr, newTime } = req.body;
   const originalDate = new Date(`${originalDateStr}T12:00:00-05:00`);
 
-  // 1. Crear la excepción SKIP para liberar el cupo habitual en la fecha original
+  // 1. Crear excepción para liberar la hora vieja en el calendario del barbero
   await db.vipException.upsert({
     where: {
       vipScheduleId_date: {
@@ -521,7 +530,7 @@ app.post('/api/vip/reschedule-week', auth, activeTenant, asyncRoute(async (req, 
     }
   });
 
-  // 2. Crear la cita en la nueva fecha seleccionada
+  // 2. Crear la cita en el nuevo horario
   const u = await db.user.findUniqueOrThrow({ where: { id: req.auth!.id }, include: { client: true } });
   const barber = await db.barber.findFirst({ where: { organizationId: req.auth!.organizationId! } });
   const service = await db.service.findFirst({ where: { organizationId: req.auth!.organizationId! } });
