@@ -5,126 +5,201 @@ import { api } from '../api';
 export default function Login() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<'login' | 'register'>('login');
+  
+  // Campos
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('admin@asys.local');
-  const [password, setPassword] = useState('AsysDemo2026!');
+  
+  const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleAuth = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg('');
     setLoading(true);
+
     try {
       if (tab === 'login') {
         const res = await api.post('/api/auth/login', { email, password });
         localStorage.setItem('asys_token', res.token);
         localStorage.setItem('asys_user', JSON.stringify(res.user));
 
-        if (res.user.role === 'SUPERADMIN') navigate('/superadmin');
-        else if (res.user.role === 'OWNER' || res.user.role === 'BARBER') navigate('/admin');
-        else navigate('/b/asysbarber');
+        // Redirección segura según el rol del usuario en PostgreSQL
+        if (res.user.role === 'SUPERADMIN') {
+          navigate('/superadmin');
+        } else if (res.user.role === 'OWNER' || res.user.role === 'BARBER') {
+          navigate('/admin');
+        } else {
+          // Cliente: se dirige a la barbería asignada o la principal
+          navigate('/b/asysbarber');
+        }
       } else {
+        // Registro de nuevo cliente
         const res = await api.post('/api/auth/register', {
           slug: 'asysbarber',
           name,
           phone,
           password,
-          code: '000000'
+          code: '000000' // Código por defecto o validado por OTP
         });
         localStorage.setItem('asys_token', res.token);
         navigate('/b/asysbarber');
       }
     } catch (err: any) {
-      alert(err.message || 'Error en autenticación');
+      setErrorMsg(err.message || 'Error al autenticar. Verifica tus credenciales.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="split-auth-layout">
-      <div className="split-hero-side">
-        <div className="split-hero-content">
-          <div className="cal-label">JMBARBER</div>
-          <h1>Estilo moderno, agenda sin vueltas.</h1>
-          <p style={{ color: '#cbd5e1', fontSize: 16, lineHeight: 1.6, marginBottom: 24 }}>
-            Reserva cortes, entra como cliente o administra las citas del estudio desde un panel claro y elegante.
+    <div className="asys-auth-container">
+      
+      {/* LADO IZQUIERDO: Escenario 3D de ASYS Technology */}
+      <div className="auth-stage-side">
+        <div className="auth-aura-glow"></div>
+        <div className="auth-grid-pattern"></div>
+
+        {/* Marca Superior */}
+        <div className="auth-stage-content">
+          <div className="stage-eyebrow">ASYS TECHNOLOGY S.A.S.</div>
+          <h1 className="auth-stage-title">
+            Plataforma Inteligente de Agendamiento <span className="text-gradient-neon">Multi-Barbería</span>
+          </h1>
+          <p className="auth-stage-desc">
+            Gestiona citas en tiempo real, fideliza clientes VIP y administra tu negocio con tecnología de alto impacto.
           </p>
-          <div>
-            <span className="pill-tag">Corte $25k</span>
-            <span className="pill-tag">8am - 8pm</span>
-            <span className="pill-tag">Agenda online</span>
+
+          <div className="stage-pill-row">
+            <span className="stage-pill">⚡ Tiempo Real</span>
+            <span className="stage-pill">🛡️ Cero Doble Reserva</span>
+            <span className="stage-pill">☁️ 100% Nube</span>
           </div>
+        </div>
+
+        {/* Núcleo Orbital 3D */}
+        <div className="stage-3d-wrapper">
+          <div className="stage-orbit"></div>
+          <div className="stage-orbit-inner"></div>
+          <div className="stage-core-logo">
+            <img src="/asys-logo.png" alt="Logo ASYS" />
+          </div>
+        </div>
+
+        {/* Pie del escenario */}
+        <div style={{ position: 'relative', zIndex: 2, color: 'var(--text-dim)', fontSize: 12 }}>
+          © 2026 ASYS Technology · Arquitectura Multi-Tenant Segura
         </div>
       </div>
 
-      <div className="split-form-side">
-        <div style={{ maxWidth: 380, width: '100%' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
-            <div className="brand-logo-sq">JM</div>
-            <div>
-              <b style={{ fontSize: 16 }}>JMbarber</b>
-              <small style={{ display: 'block', color: 'var(--text-muted)', fontSize: 12 }}>Acceso de clientes y barbero</small>
+      {/* LADO DERECHO: Formulario de Autenticación */}
+      <div className="auth-form-side">
+        <div className="auth-card-panel">
+          
+          {/* Logo y Nombre ASYS Barber */}
+          <div className="auth-brand-header">
+            <img src="/asys-logo.png" alt="ASYS Barber" className="auth-brand-logo" />
+            <div className="auth-brand-titles">
+              <b>ASYS BARBER</b>
+              <span>GESTIÓN INTELIGENTE</span>
             </div>
           </div>
 
-          <div className="auth-tabs">
-            <div className={`auth-tab ${tab === 'login' ? 'active' : ''}`} onClick={() => setTab('login')}>
-              Entrar
-            </div>
-            <div className={`auth-tab ${tab === 'register' ? 'active' : ''}`} onClick={() => setTab('register')}>
+          {/* Selector de Pestañas */}
+          <div className="auth-nav-tabs">
+            <button
+              type="button"
+              className={`auth-tab-btn ${tab === 'login' ? 'active' : ''}`}
+              onClick={() => { setTab('login'); setErrorMsg(''); }}
+            >
+              Iniciar Sesión
+            </button>
+            <button
+              type="button"
+              className={`auth-tab-btn ${tab === 'register' ? 'active' : ''}`}
+              onClick={() => { setTab('register'); setErrorMsg(''); }}
+            >
               Registrarse
-            </div>
+            </button>
           </div>
 
-          <form onSubmit={handleAuth}>
+          {/* Mensaje de error dinámico */}
+          {errorMsg && (
+            <div className="auth-error-banner">
+              {errorMsg}
+            </div>
+          )}
+
+          {/* Formulario */}
+          <form onSubmit={handleSubmit}>
             {tab === 'register' && (
               <>
-                <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Nombre completo</label>
-                <input
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  placeholder="Tu nombre"
-                  required
-                  style={{ width: '100%', background: '#131b29', border: '1px solid var(--border)', color: 'white', padding: 12, borderRadius: 8, margin: '6px 0 14px' }}
-                />
-                <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Número de celular</label>
-                <input
-                  value={phone}
-                  onChange={e => setPhone(e.target.value)}
-                  placeholder="+573001234567"
-                  required
-                  style={{ width: '100%', background: '#131b29', border: '1px solid var(--border)', color: 'white', padding: 12, borderRadius: 8, margin: '6px 0 14px' }}
-                />
+                <div className="auth-field-group">
+                  <label className="auth-label">Nombre Completo</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. Andrés Martínez"
+                    className="auth-input"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                </div>
+
+                <div className="auth-field-group">
+                  <label className="auth-label">Teléfono WhatsApp</label>
+                  <input
+                    type="tel"
+                    required
+                    placeholder="+57 300 123 4567"
+                    className="auth-input"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                  />
+                </div>
               </>
             )}
 
-            <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Correo electrónico</label>
-            <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="correo@ejemplo.com"
-              required
-              style={{ width: '100%', background: '#131b29', border: '1px solid var(--border)', color: 'white', padding: 12, borderRadius: 8, margin: '6px 0 14px' }}
-            />
+            <div className="auth-field-group">
+              <label className="auth-label">Correo Electrónico</label>
+              <input
+                type="email"
+                required
+                placeholder="usuario@ejemplo.com"
+                className="auth-input"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
 
-            <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Contraseña</label>
-            <input
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="Tu contraseña"
-              required
-              style={{ width: '100%', background: '#131b29', border: '1px solid var(--border)', color: 'white', padding: 12, borderRadius: 8, margin: '6px 0 20px' }}
-            />
+            <div className="auth-field-group">
+              <label className="auth-label">Contraseña</label>
+              <input
+                type="password"
+                required
+                placeholder="••••••••"
+                className="auth-input"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
 
-            <button type="submit" disabled={loading} className="btn-gold" style={{ width: '100%' }}>
-              {loading ? 'Procesando...' : tab === 'login' ? 'Iniciar Sesión' : 'Crear cuenta y agendar'}
+            <button type="submit" disabled={loading} className="btn-auth-submit">
+              {loading ? 'Validando credenciales...' : tab === 'login' ? 'Ingresar a la Plataforma →' : 'Crear Cuenta →'}
             </button>
           </form>
+
+          {/* Nota de Acceso Seguro */}
+          <div className="auth-note-box">
+            <b>Acceso Corporativo & Barberías</b>
+            Para acceder como administrador general (Superadmin) o dueño de barbería, utiliza las credenciales asignadas por ASYS.
+          </div>
+
         </div>
       </div>
+
     </div>
   );
 }
