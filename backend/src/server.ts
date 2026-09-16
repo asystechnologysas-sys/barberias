@@ -6,7 +6,6 @@ import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import crypto from 'crypto';
 import { PrismaClient, Role, AppointmentStatus, OrganizationStatus, VipExceptionType, VipFrequency } from '@prisma/client';
 import { z } from 'zod';
 
@@ -17,10 +16,10 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key_long_enough_20
 
 app.set('trust proxy', 1);
 app.use(helmet());
-app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') || 'https://app.asysdigital.com', credentials: true }));
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '64kb' }));
 app.use(cookieParser());
-app.use(rateLimit({ windowMs: 15 * 60_000, max: 600, standardHeaders: true, legacyHeaders: false }));
+app.use(rateLimit({ windowMs: 15 * 60_000, max: 1000, standardHeaders: true, legacyHeaders: false }));
 
 type Auth = { id: string; role: Role; organizationId: string | null };
 declare global { namespace Express { interface Request { auth?: Auth } } }
@@ -58,11 +57,9 @@ async function activeTenant(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-const timeOnDate = (d: Date, time: string) => {
-  const [h, m] = time.split(':').map(Number);
-  const x = new Date(d);
-  x.setHours(h, m, 0, 0);
-  return x;
+// Convertir fechas a hora exacta de Colombia (America/Bogota)
+const toBogotaHour = (date: Date) => {
+  return date.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
 // 1. HEALTH & PUBLIC TENANT
@@ -81,68 +78,51 @@ app.get('/api/public/:slug', asyncRoute(async (req, res) => {
     }
   });
   if (!org) return fail(res, 404, 'ORGANIZATION_NOT_FOUND', 'Barbería no encontrada.');
-  if (org.status !== OrganizationStatus.ACTIVE || org.subscriptionExpiresAt <= new Date()) {
-    return fail(res, 403, 'ORGANIZATION_SUSPENDED', 'Esta barbería no está disponible temporalmente.');
-  }
   res.json({ success: true, data: org });
 }));
 
-// Disponibilidad de citas
+// Disponibilidad sincronizada con hora de Colombia
 app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
-  const schema = z.object({
-    date: z.coerce.date(),
-    serviceId: z.string().optional(),
-    barberId: z.string().optional()
-  });
-  const q = schema.parse(req.query);
+  const dateStr = String(req.query.date);
   const org = await db.organization.findUnique({ where: { slug: String(req.params.slug) } });
-  if (!org || org.status !== OrganizationStatus.ACTIVE || org.subscriptionExpiresAt <= new Date()) {
-    return fail(res, 404, 'ORGANIZATION_UNAVAILABLE', 'Barbería no disponible.');
-  }
+  if (!org) return fail(res, 404, 'ORGANIZATION_NOT_FOUND', 'Barbería no encontrada.');
 
-  const duration = 45;
-  const candidates = await db.barber.findMany({
-    where: { organizationId: org.id, active: true, ...(q.barberId ? { id: q.barberId } : {}) }
-  });
+  const dayStart = new Date(`${dateStr}T00:00:00-05:00`);
+  const dayEnd = new Date(`${dateStr}T23:59:59-05:00`);
 
-  const day = q.date.getDay();
-  const result: { barberId: string; time: string }[] = [];
-
-  for (const b of candidates) {
-    const schedule = await db.daySchedule.findFirst({
-      where: { organizationId: org.id, weekday: day, OR: [{ barberId: b.id }, { barberId: null }] },
-      orderBy: { barberId: 'desc' }
-    });
-
-    // Horario por defecto 09:00 a 19:00 si no está configurado
-    const openTime = schedule?.openTime || '09:00';
-    const closeTime = schedule?.closeTime || '20:00';
-    if (schedule?.closed) continue;
-
-    const start = timeOnDate(q.date, openTime);
-    const end = timeOnDate(q.date, closeTime);
-
-    const appointments = await db.appointment.findMany({
+  // Citas y bloqueos del día
+  const [appointments, blocks] = await Promise.all([
+    db.appointment.findMany({
       where: {
-        barberId: b.id,
+        organizationId: org.id,
         status: AppointmentStatus.CONFIRMED,
-        startsAt: { gte: new Date(q.date.toDateString()), lt: new Date(new Date(q.date).setDate(q.date.getDate() + 1)) }
+        startsAt: { gte: dayStart, lte: dayEnd }
       }
-    });
+    }),
+    db.blockedSlot.findMany({
+      where: {
+        organizationId: org.id,
+        startsAt: { gte: dayStart, lte: dayEnd }
+      }
+    })
+  ]);
 
-    for (let slot = new Date(start); slot.getTime() + duration * 60000 <= end.getTime(); slot = new Date(slot.getTime() + 60 * 60000)) {
-      const slotEnd = new Date(slot.getTime() + duration * 60000);
-      const conflict = appointments.some(x => slot < x.endsAt && slotEnd > x.startsAt);
-      if (!conflict) {
-        result.push({ barberId: b.id, time: slot.toTimeString().slice(0, 5) });
-      }
+  const masterHours = ['09:00', '10:00', '11:00', '12:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
+  const freeSlots: { time: string }[] = [];
+
+  for (const h of masterHours) {
+    const isBooked = appointments.some(a => toBogotaHour(a.startsAt) === h);
+    const isBlocked = blocks.some(b => toBogotaHour(b.startsAt) === h);
+
+    if (!isBooked && !isBlocked) {
+      freeSlots.push({ time: h });
     }
   }
 
-  res.json({ success: true, data: result });
+  res.json({ success: true, data: freeSlots });
 }));
 
-// 2. AUTH
+// 2. AUTHENTICATION (Login y Registro Directo)
 app.post('/api/auth/login', asyncRoute(async (req, res) => {
   const v = z.object({ email: z.string().email(), password: z.string().min(6) }).parse(req.body);
   const user = await db.user.findUnique({ where: { email: v.email }, include: { organization: true } });
@@ -154,17 +134,61 @@ app.post('/api/auth/login', asyncRoute(async (req, res) => {
      .json({ success: true, data: { token, user: { id: user.id, name: user.name, role: user.role, organizationId: user.organizationId } } });
 }));
 
-// 3. APPOINTMENTS (Reserva corregida sin bloqueo de UUID)
-app.post('/api/appointments', auth, activeTenant, role(Role.CLIENT), asyncRoute(async (req, res) => {
+app.post('/api/auth/register', asyncRoute(async (req, res) => {
   const v = z.object({
-    serviceId: z.string().min(1), // Permite cualquier ID de servicio
+    slug: z.string(),
+    name: z.string().min(2),
+    phone: z.string().min(8),
+    password: z.string().min(6),
+    email: z.string().email().optional()
+  }).parse(req.body);
+
+  const org = await db.organization.findUnique({ where: { slug: v.slug } });
+  if (!org) return fail(res, 404, 'ORGANIZATION_NOT_FOUND', 'Barbería no encontrada.');
+
+  const clientEmail = v.email || `${v.phone.replace(/[^0-9]/g, '')}@asysbarber.local`;
+  const passwordHash = await bcrypt.hash(v.password, 10);
+
+  const user = await db.user.create({
+    data: {
+      name: v.name,
+      phone: v.phone,
+      email: clientEmail,
+      passwordHash,
+      role: Role.CLIENT,
+      organizationId: org.id,
+      client: {
+        create: {
+          organizationId: org.id,
+          name: v.name,
+          phone: v.phone,
+          verifiedAt: new Date()
+        }
+      }
+    }
+  });
+
+  const token = tokenFor(user);
+  res.status(201).json({ success: true, data: { token, user } });
+}));
+
+// 3. CITAS (Crear, Listar y Cancelar)
+app.post('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) => {
+  const v = z.object({
+    serviceId: z.string().min(1),
     barberId: z.string().optional().nullable(),
     startsAt: z.coerce.date()
   }).parse(req.body);
 
   const orgId = req.auth!.organizationId!;
-  const client = await db.client.findUnique({ where: { userId: req.auth!.id } });
-  if (!client) return fail(res, 403, 'CLIENT_REQUIRED', 'Perfil de cliente requerido.');
+  let client = await db.client.findUnique({ where: { userId: req.auth!.id } });
+  
+  if (!client) {
+    const u = await db.user.findUniqueOrThrow({ where: { id: req.auth!.id } });
+    client = await db.client.create({
+      data: { organizationId: orgId, userId: u.id, name: u.name, phone: u.phone || '+573000000000' }
+    });
+  }
 
   const service = await db.service.findFirst({ where: { id: v.serviceId, organizationId: orgId } });
   if (!service) return fail(res, 404, 'SERVICE_NOT_FOUND', 'Servicio no encontrado.');
@@ -176,7 +200,7 @@ app.post('/api/appointments', auth, activeTenant, role(Role.CLIENT), asyncRoute(
   }
   if (!barberId) return fail(res, 404, 'BARBER_NOT_FOUND', 'No hay barberos disponibles.');
 
-  const endsAt = new Date(v.startsAt.getTime() + service.durationMinutes * 60000);
+  const endsAt = new Date(v.startsAt.getTime() + (service.durationMinutes || 45) * 60000);
 
   const appointment = await db.appointment.create({
     data: {
@@ -200,12 +224,78 @@ app.get('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) => 
   const appointments = await db.appointment.findMany({
     where: { organizationId: req.auth!.organizationId! },
     include: { service: true, barber: true },
-    orderBy: { startsAt: 'desc' }
+    orderBy: { startsAt: 'asc' }
   });
   res.json({ success: true, data: appointments });
 }));
 
-// 4. SUPERADMIN (Habilitada la consulta y gestión de todas las barberías)
+// Cancelar Cita
+app.patch('/api/appointments/:id/cancel', auth, activeTenant, asyncRoute(async (req, res) => {
+  const a = await db.appointment.findFirst({
+    where: { id: String(req.params.id), organizationId: req.auth!.organizationId! }
+  });
+  if (!a) return fail(res, 404, 'NOT_FOUND', 'Cita no encontrada.');
+
+  await db.appointment.update({
+    where: { id: a.id },
+    data: { status: AppointmentStatus.CANCELLED }
+  });
+
+  res.json({ success: true });
+}));
+
+// 4. BLOQUEOS DE HORA
+app.get('/api/blocks', auth, activeTenant, asyncRoute(async (req, res) => {
+  const blocks = await db.blockedSlot.findMany({
+    where: { organizationId: req.auth!.organizationId! },
+    orderBy: { startsAt: 'asc' }
+  });
+  res.json({ success: true, data: blocks });
+}));
+
+app.post('/api/blocks', auth, activeTenant, asyncRoute(async (req, res) => {
+  const v = z.object({
+    startsAt: z.coerce.date(),
+    endsAt: z.coerce.date(),
+    reason: z.string().optional()
+  }).parse(req.body);
+
+  const block = await db.blockedSlot.create({
+    data: {
+      organizationId: req.auth!.organizationId!,
+      startsAt: v.startsAt,
+      endsAt: v.endsAt,
+      reason: v.reason || 'Descanso'
+    }
+  });
+
+  res.status(201).json({ success: true, data: block });
+}));
+
+app.delete('/api/blocks/:id', auth, activeTenant, asyncRoute(async (req, res) => {
+  await db.blockedSlot.deleteMany({
+    where: { id: String(req.params.id), organizationId: req.auth!.organizationId! }
+  });
+  res.json({ success: true });
+}));
+
+// 5. CLIENTES VIP
+app.get('/api/vip', auth, activeTenant, asyncRoute(async (req, res) => {
+  const vips = await db.vipSchedule.findMany({
+    where: { organizationId: req.auth!.organizationId! },
+    include: { client: true, barber: true }
+  });
+  res.json({ success: true, data: vips });
+}));
+
+app.delete('/api/vip/:id', auth, activeTenant, asyncRoute(async (req, res) => {
+  await db.vipSchedule.deleteMany({
+    where: { id: String(req.params.id), organizationId: req.auth!.organizationId! }
+  });
+  res.json({ success: true });
+}));
+
+// 6. SUPERADMIN
 app.get('/api/superadmin/stats', auth, role(Role.SUPERADMIN), asyncRoute(async (_q, res) => {
   const [total, active, suspended, totalBarbers, totalAppointments] = await Promise.all([
     db.organization.count(),
@@ -243,31 +333,6 @@ app.post('/api/superadmin/organizations', auth, role(Role.SUPERADMIN), asyncRout
     maxBarbers: z.number().int().min(1).max(100)
   }).parse(req.body);
   res.status(201).json({ success: true, data: await db.organization.create({ data: v }) });
-}));
-
-// Listar bloqueos del barbero
-app.get('/api/blocks', auth, activeTenant, role(Role.OWNER, Role.BARBER), asyncRoute(async (req, res) => {
-  const blocks = await db.blockedSlot.findMany({
-    where: { organizationId: req.auth!.organizationId! },
-    orderBy: { startsAt: 'asc' }
-  });
-  res.json({ success: true, data: blocks });
-}));
-
-// Eliminar un bloqueo (liberar la hora)
-app.delete('/api/blocks/:id', auth, activeTenant, role(Role.OWNER, Role.BARBER), asyncRoute(async (req, res) => {
-  await db.blockedSlot.deleteMany({
-    where: { id: String(req.params.id), organizationId: req.auth!.organizationId! }
-  });
-  res.json({ success: true });
-}));
-
-// Eliminar cliente VIP
-app.delete('/api/vip/:id', auth, activeTenant, role(Role.OWNER, Role.BARBER), asyncRoute(async (req, res) => {
-  await db.vipSchedule.deleteMany({
-    where: { id: String(req.params.id), organizationId: req.auth!.organizationId! }
-  });
-  res.json({ success: true });
 }));
 
 app.patch('/api/superadmin/organizations/:id', auth, role(Role.SUPERADMIN), asyncRoute(async (req, res) => {

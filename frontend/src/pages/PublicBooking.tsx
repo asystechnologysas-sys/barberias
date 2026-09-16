@@ -106,7 +106,7 @@ export default function PublicBooking() {
     }
 
     try {
-      const startsAt = new Date(`${selectedDate}T${selectedTime}:00`);
+      const startsAt = new Date(`${selectedDate}T${selectedTime}:00-05:00`);
       await api.post('/api/appointments', {
         serviceId: selectedService.id,
         barberId: selectedBarber || undefined,

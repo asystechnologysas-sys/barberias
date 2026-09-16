@@ -1,7 +1,8 @@
 export const api = {
   get: async (url: string) => {
+    const cleanUrl = url.startsWith('/') ? url : `/${url}`;
     const token = localStorage.getItem('asys_token');
-    const res = await fetch(url, {
+    const res = await fetch(cleanUrl, {
       headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
     });
     const data = await res.json();
@@ -9,8 +10,9 @@ export const api = {
     return data.data;
   },
   post: async (url: string, body: any) => {
+    const cleanUrl = url.startsWith('/') ? url : `/${url}`;
     const token = localStorage.getItem('asys_token');
-    const res = await fetch(url, {
+    const res = await fetch(cleanUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -23,8 +25,9 @@ export const api = {
     return data.data;
   },
   patch: async (url: string, body: any) => {
+    const cleanUrl = url.startsWith('/') ? url : `/${url}`;
     const token = localStorage.getItem('asys_token');
-    const res = await fetch(url, {
+    const res = await fetch(cleanUrl, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -34,6 +37,17 @@ export const api = {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error?.message || 'Error al actualizar');
+    return data.data;
+  },
+  delete: async (url: string) => {
+    const cleanUrl = url.startsWith('/') ? url : `/${url}`;
+    const token = localStorage.getItem('asys_token');
+    const res = await fetch(cleanUrl, {
+      method: 'DELETE',
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || 'Error al eliminar');
     return data.data;
   }
 };
