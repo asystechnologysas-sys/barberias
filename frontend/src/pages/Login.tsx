@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
-import logoAsys from './logoAsys.png'; // <-- Importación directa y segura
+import logoAsys from './logoAsys.png';
 
 export default function Login() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<'login' | 'register'>('login');
   
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  // Campos sin correo para registro
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginUser, setLoginUser] = useState(''); // Celular o correo para login
   
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
@@ -22,30 +23,29 @@ export default function Login() {
 
     try {
       if (tab === 'login') {
-        const res = await api.post('/api/auth/login', { email, password });
+        const res = await api.post('/api/auth/login', {
+          email: loginUser,
+          password
+        });
         localStorage.setItem('asys_token', res.token);
         localStorage.setItem('asys_user', JSON.stringify(res.user));
 
-        if (res.user.role === 'SUPERADMIN') {
-          navigate('/superadmin');
-        } else if (res.user.role === 'OWNER' || res.user.role === 'BARBER') {
-          navigate('/admin');
-        } else {
-          navigate('/b/asysbarber');
-        }
+        if (res.user.role === 'SUPERADMIN') navigate('/superadmin');
+        else if (res.user.role === 'OWNER' || res.user.role === 'BARBER') navigate('/admin');
+        else navigate('/b/asysbarber');
       } else {
         const res = await api.post('/api/auth/register', {
           slug: 'asysbarber',
           name,
           phone,
-          password,
-          code: '000000'
+          password
         });
         localStorage.setItem('asys_token', res.token);
+        localStorage.setItem('asys_user', JSON.stringify(res.user));
         navigate('/b/asysbarber');
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Credenciales incorrectas. Verifica tus datos.');
+      setErrorMsg(err.message || 'Error en autenticación');
     } finally {
       setLoading(false);
     }
@@ -53,21 +53,13 @@ export default function Login() {
 
   return (
     <div className="login-split-container">
-      
-      {/* LADO IZQUIERDO: Fotografía con atmósfera */}
       <div className="login-visual-side">
-        <div className="badge-brand-chip">
-          ⚡ ASYS BARBER SOFTWARE
-        </div>
-
+        <div className="badge-brand-chip">⚡ ASYS BARBER SOFTWARE</div>
         <div className="login-visual-content">
-          <h1 className="login-visual-title">
-            Estilo moderno, agenda sin vueltas.
-          </h1>
+          <h1 className="login-visual-title">Estilo moderno, agenda sin vueltas.</h1>
           <p className="login-visual-desc">
             Gestiona citas, turnos y clientes en tiempo real. La experiencia digital diseñada para barberías que valoran su tiempo.
           </p>
-
           <div className="pill-features-row">
             <span className="pill-feature">✂️ Citas en vivo</span>
             <span className="pill-feature">📱 Notificaciones WhatsApp</span>
@@ -76,24 +68,16 @@ export default function Login() {
         </div>
       </div>
 
-      {/* LADO DERECHO: Tarjeta Flotante sobre fondo armónico */}
       <div className="login-form-side">
         <div className="login-card-floating">
-          
-          {/* Logo ASYS como imagen importada */}
           <div className="app-brand-header">
-            <img
-              src={logoAsys}
-              alt="ASYS Barber"
-              className="app-brand-avatar"
-            />
+            <img src={logoAsys} alt="ASYS Barber" className="app-brand-avatar" />
             <div className="app-brand-titles">
               <b>ASYS BARBER</b>
               <span>SOFTWARE DE GESTIÓN</span>
             </div>
           </div>
 
-          {/* Pestañas Entrar / Registrarse */}
           <div className="clean-tabs-nav">
             <button
               type="button"
@@ -111,17 +95,13 @@ export default function Login() {
             </button>
           </div>
 
-          {errorMsg && (
-            <div className="clean-error-banner">
-              {errorMsg}
-            </div>
-          )}
+          {errorMsg && <div className="clean-error-banner">{errorMsg}</div>}
 
           <form onSubmit={handleSubmit}>
-            {tab === 'register' && (
+            {tab === 'register' ? (
               <>
                 <div className="input-group">
-                  <label className="input-label">Nombre completo</label>
+                  <label className="input-label">Nombre Completo</label>
                   <input
                     type="text"
                     required
@@ -133,7 +113,7 @@ export default function Login() {
                 </div>
 
                 <div className="input-group">
-                  <label className="input-label">Número de celular</label>
+                  <label className="input-label">Número de Celular (WhatsApp)</label>
                   <input
                     type="tel"
                     required
@@ -143,46 +123,62 @@ export default function Login() {
                     onChange={(e) => setPhone(e.target.value)}
                   />
                 </div>
+
+                <div className="input-group">
+                  <label className="input-label">Crea una Contraseña</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Mínimo 4 caracteres"
+                    className="clean-input"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+
+                <button type="submit" disabled={loading} className="btn-clean-submit">
+                  {loading ? 'Creando cuenta...' : 'Crear Cuenta y Agendar →'}
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="input-group">
+                  <label className="input-label">Celular o Correo</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="3001234567 o correo@ejemplo.com"
+                    className="clean-input"
+                    value={loginUser}
+                    onChange={(e) => setLoginUser(e.target.value)}
+                  />
+                </div>
+
+                <div className="input-group">
+                  <label className="input-label">Contraseña</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Tu contraseña"
+                    className="clean-input"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+
+                <button type="submit" disabled={loading} className="btn-clean-submit">
+                  {loading ? 'Ingresando...' : 'Iniciar Sesión →'}
+                </button>
               </>
             )}
-
-            <div className="input-group">
-              <label className="input-label">Correo electrónico</label>
-              <input
-                type="email"
-                required
-                placeholder="correo@ejemplo.com"
-                className="clean-input"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-
-            <div className="input-group">
-              <label className="input-label">Contraseña</label>
-              <input
-                type="password"
-                required
-                placeholder="Mínimo 8 caracteres"
-                className="clean-input"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-
-            <button type="submit" disabled={loading} className="btn-clean-submit">
-              {loading ? 'Accediendo...' : tab === 'login' ? 'Iniciar Sesión →' : 'Crear Cuenta y Agendar →'}
-            </button>
           </form>
 
           <div className="clean-note-box">
             <b>Acceso a la plataforma</b>
-            Clientes, barberos y administradores acceden según los permisos de su cuenta.
+            Clientes, barberos y dueños acceden desde aquí según sus permisos.
           </div>
-
         </div>
       </div>
-
     </div>
   );
 }

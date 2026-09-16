@@ -1,34 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { X, CheckCircle2, LogOut } from 'lucide-react';
+import { X, CheckCircle2, LogOut, Crown } from 'lucide-react';
 import { api } from '../api';
 
 export default function PublicBooking() {
   const { slug = 'asysbarber' } = useParams();
   const navigate = useNavigate();
   
-  // Estados de barbería
   const [org, setOrg] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selectedService, setSelectedService] = useState<any>(null);
   const [selectedBarber, setSelectedBarber] = useState<string>('');
   
-  // Estados de selección
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedTime, setSelectedTime] = useState<string>('');
   
-  // Modal flotante de horas
   const [showHoursModal, setShowHoursModal] = useState(false);
   const [freeHours, setFreeHours] = useState<string[]>([]);
   const [loadingHours, setLoadingHours] = useState(false);
   const [confirmSuccess, setConfirmSuccess] = useState(false);
 
-  // Sesión del cliente
+  // Sesión y Datos Reales del Cliente
   const token = localStorage.getItem('asys_token');
   const userStr = localStorage.getItem('asys_user');
   const currentUser = userStr ? JSON.parse(userStr) : null;
 
-  // Horas base de la jornada
   const masterDayHours = ['09:00', '10:00', '11:00', '12:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
 
   useEffect(() => {
@@ -42,7 +38,7 @@ export default function PublicBooking() {
       .catch(() => setLoading(false));
   }, [slug]);
 
-  // Días del mes (los próximos 7 días activos)
+  // Días habilitados (7 días hábiles)
   const today = new Date();
   const currentMonthDays = Array.from({ length: 30 }, (_, i) => {
     const d = new Date(today.getFullYear(), today.getMonth(), i + 1);
@@ -58,19 +54,6 @@ export default function PublicBooking() {
     };
   });
 
-  // Normalizar horas (soporta tanto formato "09:00" como ISO completo)
-  const normalizeHour = (rawTime: string) => {
-    if (!rawTime) return '';
-    if (rawTime.includes('T')) {
-      const d = new Date(rawTime);
-      const h = String(d.getHours()).padStart(2, '0');
-      const m = String(d.getMinutes()).padStart(2, '0');
-      return `${h}:${m}`;
-    }
-    return rawTime.slice(0, 5);
-  };
-
-  // Al hacer clic en un día se abre el modal flotante en el centro
   const handleDaySelect = async (day: any) => {
     if (!day.inRange) return;
     setSelectedDate(day.dateStr);
@@ -79,13 +62,9 @@ export default function PublicBooking() {
     setShowHoursModal(true);
 
     try {
-      const data = await api.get(`/api/public/${slug}/availability?date=${day.dateStr}&barberId=${selectedBarber || ''}`);
-      if (Array.isArray(data) && data.length > 0) {
-        const parsed = data.map((item: any) => normalizeHour(item.time));
-        setFreeHours(parsed);
-      } else {
-        setFreeHours(masterDayHours);
-      }
+      const data = await api.get(`/api/public/${slug}/availability?date=${day.dateStr}`);
+      const serverTimes = data.map((item: any) => item.time);
+      setFreeHours(serverTimes);
     } catch {
       setFreeHours(masterDayHours);
     } finally {
@@ -124,38 +103,39 @@ export default function PublicBooking() {
     navigate('/login');
   };
 
-  if (loading) {
-    return <div style={{ padding: 100, textAlign: 'center', color: '#64748b' }}>Cargando barbería...</div>;
-  }
-
-  if (!org) {
-    return <div style={{ padding: 100, textAlign: 'center', color: '#ef4444' }}>Barbería no disponible temporalmente.</div>;
-  }
+  if (loading) return <div style={{ padding: 100, textAlign: 'center', color: '#64748b' }}>Cargando barbería...</div>;
+  if (!org) return <div style={{ padding: 100, textAlign: 'center', color: '#ef4444' }}>Barbería no disponible.</div>;
 
   return (
     <div className="client-page-wrap">
       
-      {/* 1. ENCABEZADO SUPERIOR */}
+      {/* 1. ENCABEZADO SUPERIOR CON SALUDO REAL Y BADGE VIP */}
       <header className="client-top-bar">
         <div className="client-brand-area">
           <div className="barber-logo-placeholder">
-            {org.logoUrl ? (
-              <img src={org.logoUrl} alt={org.name} />
-            ) : (
-              org.name.slice(0, 2).toUpperCase()
-            )}
+            {org.logoUrl ? <img src={org.logoUrl} alt={org.name} /> : org.name.slice(0, 2).toUpperCase()}
           </div>
           <div className="client-welcome-greeting">
             <b>{org.name}</b>
             <span>
-              {currentUser ? `👋 Bienvenido, ${currentUser.name}` : 'Agenda tu cita en segundos'}
+              {currentUser ? (
+                currentUser.isVip ? (
+                  <span style={{ color: '#d97706', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <Crown size={14} color="#f59e0b" /> Bienvenido, {currentUser.name} (Cliente VIP)
+                  </span>
+                ) : (
+                  `👋 Bienvenido, ${currentUser.name}`
+                )
+              ) : (
+                'Agenda tu cita en segundos'
+              )}
             </span>
           </div>
         </div>
 
         <div>
           {token ? (
-            <button onClick={handleLogout} className="btn-logout-modern" title="Cerrar sesión y volver al login">
+            <button onClick={handleLogout} className="btn-logout-modern" title="Cerrar sesión">
               <LogOut size={15} /> Cerrar sesión
             </button>
           ) : (
@@ -166,7 +146,7 @@ export default function PublicBooking() {
         </div>
       </header>
 
-      {/* 2. CONTENIDO PRINCIPAL */}
+      {/* 2. CUERPO PRINCIPAL */}
       <div className="client-content-container">
         
         {/* Selector de Servicios */}
@@ -203,9 +183,7 @@ export default function PublicBooking() {
                 <span className="cal-eyebrow">AGENDA ONLINE</span>
                 <h2 className="cal-month-title">Septiembre 2026</h2>
               </div>
-              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>
-                Próximos 7 días hábiles
-              </span>
+              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Próximos 7 días hábiles</span>
             </div>
 
             <div className="cal-week-labels">
@@ -213,29 +191,24 @@ export default function PublicBooking() {
             </div>
 
             <div className="cal-days-grid">
-              {currentMonthDays.map((d, index) => {
-                const isSelected = selectedDate === d.dateStr;
-                const statusClass = !d.inRange ? 'cell-disabled' : 'status-green';
-
-                return (
-                  <div
-                    key={index}
-                    onClick={() => handleDaySelect(d)}
-                    className={`cal-cell ${statusClass} ${isSelected ? 'cell-selected' : ''}`}
-                  >
-                    <div className="cal-cell-num">{d.dayNum}</div>
-                    <div className="cal-cell-status">
-                      {d.isSunday ? (
-                        <span style={{ color: '#94a3b8' }}>Cerrado</span>
-                      ) : !d.inRange ? (
-                        <span style={{ color: '#94a3b8' }}>Inactivo</span>
-                      ) : (
-                        <span>● Libre</span>
-                      )}
-                    </div>
+              {currentMonthDays.map((d, index) => (
+                <div
+                  key={index}
+                  onClick={() => handleDaySelect(d)}
+                  className={`cal-cell ${!d.inRange ? 'cell-disabled' : 'status-green'} ${selectedDate === d.dateStr ? 'cell-selected' : ''}`}
+                >
+                  <div className="cal-cell-num">{d.dayNum}</div>
+                  <div className="cal-cell-status">
+                    {d.isSunday ? (
+                      <span style={{ color: '#94a3b8' }}>Cerrado</span>
+                    ) : !d.inRange ? (
+                      <span style={{ color: '#94a3b8' }}>Inactivo</span>
+                    ) : (
+                      <span>● Libre</span>
+                    )}
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
 
@@ -286,7 +259,7 @@ export default function PublicBooking() {
         </div>
       </div>
 
-      {/* 3. MODAL DE HORARIOS FLOTANTE ARRIBA */}
+      {/* MODAL DE HORARIOS FLOTANTE ARRIBA */}
       {showHoursModal && (
         <div className="modal-hours-overlay">
           <div className="modal-hours-box">
@@ -328,7 +301,7 @@ export default function PublicBooking() {
         </div>
       )}
 
-      {/* MODAL DE CITA CONFIRMADA */}
+      {/* MODAL CONFIRMACIÓN ÉXITO */}
       {confirmSuccess && (
         <div className="modal-hours-overlay">
           <div className="modal-hours-box" style={{ textAlign: 'center', maxWidth: 420 }}>
