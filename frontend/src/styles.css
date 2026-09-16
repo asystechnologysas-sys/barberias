@@ -1,320 +1,234 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@400;600;700;800&display=swap');
 
 :root {
-  --bg-deep: #050811;
-  --bg-surface: #0b1020;
-  --bg-card: #10172c;
-  --bg-card-hover: #151f3b;
-  --border-subtle: #1e2942;
-  --border-glow: #1554ff;
-  --blue-primary: #1554ff;
-  --blue-neon: #00b4ff;
-  --cyan-accent: #00f0ff;
-  --text-primary: #f8fafc;
+  --primary-blue: #1554ff;
+  --primary-hover: #0c42d4;
+  --text-dark: #0b1020;
+  --text-body: #475569;
   --text-muted: #94a3b8;
-  --text-dim: #64748b;
+  --bg-light: #f8fafc;
+  --border-light: #e2e8f0;
+  --border-focus: #1554ff;
   --danger: #ef4444;
   --success: #10b981;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  background-color: var(--bg-deep);
-  color: var(--text-primary);
+  background-color: #ffffff;
+  color: var(--text-dark);
   font-family: 'Manrope', sans-serif;
   min-height: 100vh;
-  overflow-x: hidden;
 }
 
-/* Tipografía de títulos */
-h1, h2, h3, h4, .font-sora {
+h1, h2, h3, b, .font-sora {
   font-family: 'Sora', sans-serif;
 }
 
-/* Efecto de texto degradado azul neón oficial ASYS */
-.text-gradient-neon {
-  background: linear-gradient(90deg, #1554ff 0%, #00d2ff 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
 /* =========================================================
-   PANTALLA DE LOGIN DIVIDIDA ASYS (3D STAGE + AUTH FORM)
+   LOGIN MODERNO ESTILO SOFTWARE ASYS (FOTO + PANEL BLANCO)
    ========================================================= */
-.asys-auth-container {
+.login-split-container {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 1.15fr 0.85fr;
-  position: relative;
-  overflow: hidden;
+  grid-template-columns: 1.1fr 0.9fr;
+  background: #ffffff;
 }
 
-/* LADO IZQUIERDO: ESCENARIO 3D TECNOLÓGICO */
-.auth-stage-side {
+/* LADO IZQUIERDO: Foto Barbería con tono moderno */
+.login-visual-side {
   position: relative;
-  background: radial-gradient(circle at 20% 30%, #0d1a3a 0%, #050811 75%);
-  padding: 60px clamp(30px, 5vw, 80px);
+  background: url('https://images.unsplash.com/photo-1503951914875-452162b0f3f1?q=80&w=1400') center/cover no-repeat;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  border-right: 1px solid var(--border-subtle);
-  overflow: hidden;
+  padding: clamp(30px, 5vw, 60px);
 }
 
-/* Resplandores y cuadrícula 3D */
-.auth-aura-glow {
-  position: absolute;
-  width: 600px;
-  height: 600px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(21, 84, 255, 0.22) 0%, transparent 65%);
-  top: -100px;
-  left: -100px;
-  filter: blur(60px);
-  pointer-events: none;
-}
-
-.auth-grid-pattern {
+/* Capa degradada sobre la foto */
+.login-visual-side::before {
+  content: '';
   position: absolute;
   inset: 0;
-  background-image: linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-  background-size: 40px 40px;
-  mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
-  pointer-events: none;
+  background: linear-gradient(180deg, rgba(11, 16, 32, 0.4) 0%, rgba(11, 16, 32, 0.92) 100%);
 }
 
-/* Escenario con órbitas giratorias */
-.stage-3d-wrapper {
-  position: relative;
-  width: 280px;
-  height: 280px;
-  margin: 40px auto;
-  perspective: 1000px;
-}
-
-.stage-orbit {
-  position: absolute;
-  inset: 0;
-  border: 1px solid rgba(0, 180, 255, 0.3);
-  border-radius: 50%;
-  transform-style: preserve-3d;
-  animation: orbitRotate 18s linear infinite;
-}
-
-.stage-orbit-inner {
-  position: absolute;
-  inset: 18%;
-  border: 1px dashed rgba(21, 84, 255, 0.5);
-  border-radius: 50%;
-  animation: orbitRotateRev 12s linear infinite;
-}
-
-.stage-core-logo {
-  position: absolute;
-  inset: 28%;
-  background: linear-gradient(135deg, #101d3f, #080e1e);
-  border: 2px solid var(--blue-primary);
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  box-shadow: 0 0 45px rgba(21, 84, 255, 0.45);
-}
-
-.stage-core-logo img {
-  width: 55%;
-  height: 55%;
-  object-fit: contain;
-}
-
-@keyframes orbitRotate {
-  from { transform: rotateX(65deg) rotateZ(0deg); }
-  to { transform: rotateX(65deg) rotateZ(360deg); }
-}
-
-@keyframes orbitRotateRev {
-  from { transform: rotateX(65deg) rotateZ(360deg); }
-  to { transform: rotateX(65deg) rotateZ(0deg); }
-}
-
-/* Textos del lado izquierdo */
-.auth-stage-content {
+.login-visual-content {
   position: relative;
   z-index: 2;
+  max-width: 520px;
+  margin-top: auto;
+  color: #ffffff;
 }
 
-.stage-eyebrow {
+.badge-brand-chip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  color: var(--blue-neon);
+  gap: 6px;
+  background: rgba(21, 84, 255, 0.25);
+  border: 1px solid rgba(21, 84, 255, 0.5);
+  color: #93c5fd;
   font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
-  margin-bottom: 16px;
-}
-.stage-eyebrow::before {
-  content: '';
-  width: 24px;
-  height: 2px;
-  background: var(--blue-primary);
-}
-
-.auth-stage-title {
-  font-size: clamp(34px, 3.8vw, 52px);
-  font-weight: 800;
-  line-height: 1.1;
-  letter-spacing: -0.04em;
+  letter-spacing: 0.12em;
+  padding: 6px 14px;
+  border-radius: 20px;
   margin-bottom: 18px;
 }
 
-.auth-stage-desc {
-  color: var(--text-muted);
-  font-size: 15px;
-  line-height: 1.7;
-  max-width: 480px;
+.login-visual-title {
+  font-size: clamp(34px, 3.6vw, 46px);
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  margin-bottom: 14px;
+  color: #ffffff;
 }
 
-.stage-pill-row {
+.login-visual-desc {
+  color: #cbd5e1;
+  font-size: 15px;
+  line-height: 1.65;
+  margin-bottom: 24px;
+}
+
+.pill-features-row {
   display: flex;
   gap: 10px;
-  margin-top: 24px;
   flex-wrap: wrap;
 }
 
-.stage-pill {
-  background: rgba(21, 84, 255, 0.08);
-  border: 1px solid rgba(0, 180, 255, 0.25);
-  color: #bfdbfe;
-  font-size: 11px;
+.pill-feature {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  font-size: 12px;
   font-weight: 700;
   padding: 6px 14px;
   border-radius: 20px;
-  letter-spacing: 0.04em;
 }
 
-/* LADO DERECHO: FORMULARIO */
-.auth-form-side {
-  background: var(--bg-surface);
+/* LADO DERECHO: Formulario Limpio Fondo Blanco */
+.login-form-side {
+  background: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 40px 24px;
-  position: relative;
 }
 
-.auth-card-panel {
+.login-card-box {
   width: 100%;
-  max-width: 400px;
+  max-width: 410px;
 }
 
-/* Encabezado del Formulario */
-.auth-brand-header {
+/* Logo ASYS Barber con icono vectorial limpio */
+.app-brand-header {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 28px;
+  gap: 12px;
+  margin-bottom: 30px;
 }
 
-.auth-brand-logo {
-  width: 46px;
-  height: 46px;
+.app-brand-icon {
+  width: 44px;
+  height: 44px;
+  background: #1554ff;
   border-radius: 50%;
-  background: #0d162c;
-  border: 1px solid var(--border-subtle);
-  padding: 8px;
-  object-fit: contain;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 6px 16px rgba(21, 84, 255, 0.3);
 }
 
-.auth-brand-titles b {
+.app-brand-titles b {
   display: block;
-  font-family: 'Sora', sans-serif;
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 800;
-  color: #fff;
+  color: var(--text-dark);
   letter-spacing: -0.02em;
 }
 
-.auth-brand-titles span {
+.app-brand-titles span {
   display: block;
-  font-size: 9px;
+  font-size: 9.5px;
   font-weight: 800;
-  letter-spacing: 0.24em;
-  color: var(--blue-neon);
+  letter-spacing: 0.2em;
+  color: var(--primary-blue);
 }
 
 /* Pestañas Entrar / Registrarse */
-.auth-nav-tabs {
+.clean-tabs-nav {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  background: #080d1a;
-  border: 1px solid var(--border-subtle);
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
   padding: 4px;
-  border-radius: 12px;
+  border-radius: 10px;
   margin-bottom: 26px;
 }
 
-.auth-tab-btn {
+.clean-tab-btn {
   padding: 10px;
   text-align: center;
   font-size: 13px;
   font-weight: 700;
-  color: var(--text-muted);
+  color: var(--text-body);
   background: transparent;
   border: none;
-  border-radius: 8px;
+  border-radius: 7px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
-.auth-tab-btn.active {
-  background: linear-gradient(90deg, #1554ff 0%, #0099ff 100%);
-  color: #ffffff;
-  box-shadow: 0 4px 16px rgba(21, 84, 255, 0.4);
+.clean-tab-btn.active {
+  background: #ffffff;
+  color: var(--primary-blue);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
-/* Campos de entrada */
-.auth-field-group {
+/* Campos de entrada en blanco */
+.input-group {
   margin-bottom: 16px;
 }
 
-.auth-label {
+.input-label {
   display: block;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.08em;
-  color: var(--text-muted);
+  color: #334155;
   text-transform: uppercase;
   margin-bottom: 6px;
 }
 
-.auth-input {
+.clean-input {
   width: 100%;
-  background: #070b16;
-  border: 1px solid var(--border-subtle);
-  color: #ffffff;
+  background: #f8fafc;
+  border: 1.5px solid var(--border-light);
+  color: var(--text-dark);
   padding: 13px 14px;
   border-radius: 10px;
   font-size: 14px;
   font-family: inherit;
   outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: all 0.2s ease;
 }
 
-.auth-input:focus {
-  border-color: var(--blue-primary);
-  box-shadow: 0 0 0 3px rgba(21, 84, 255, 0.2);
+.clean-input:focus {
+  background: #ffffff;
+  border-color: var(--primary-blue);
+  box-shadow: 0 0 0 3px rgba(21, 84, 255, 0.15);
 }
 
-.auth-input::placeholder {
-  color: #475569;
+.clean-input::placeholder {
+  color: #94a3b8;
 }
 
-/* Botón de acción Neón */
-.btn-auth-submit {
+/* Botón Azul ASYS */
+.btn-clean-submit {
   width: 100%;
-  background: linear-gradient(90deg, #1554ff 0%, #0099ff 100%);
+  background: linear-gradient(90deg, #1554ff 0%, #0077ff 100%);
   color: #ffffff;
   border: none;
   padding: 14px;
@@ -322,60 +236,66 @@ h1, h2, h3, h4, .font-sora {
   font-size: 14px;
   font-weight: 800;
   font-family: 'Sora', sans-serif;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   cursor: pointer;
   transition: all 0.25s ease;
-  box-shadow: 0 8px 24px rgba(21, 84, 255, 0.35);
-  margin-top: 10px;
+  box-shadow: 0 6px 20px rgba(21, 84, 255, 0.35);
+  margin-top: 8px;
 }
 
-.btn-auth-submit:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 30px rgba(0, 180, 255, 0.55);
+.btn-clean-submit:hover {
+  background: linear-gradient(90deg, #0c42d4 0%, #0066ee 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 25px rgba(21, 84, 255, 0.45);
 }
 
-.btn-auth-submit:disabled {
+.btn-clean-submit:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
 }
 
-/* Caja de advertencia o ayuda inferior */
-.auth-note-box {
+/* Mensaje de ayuda */
+.clean-note-box {
   margin-top: 24px;
-  background: rgba(21, 84, 255, 0.05);
-  border: 1px solid rgba(21, 84, 255, 0.18);
+  background: #f0f6ff;
+  border: 1px solid #bfdbfe;
   border-radius: 10px;
   padding: 14px;
   font-size: 12px;
-  color: var(--text-muted);
+  color: #1e40af;
   line-height: 1.5;
 }
 
-.auth-note-box b {
-  color: #93c5fd;
+.clean-note-box b {
+  color: #1e3a8a;
   display: block;
   margin-bottom: 2px;
 }
 
-/* Error banner */
-.auth-error-banner {
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  color: #fca5a5;
+/* Error */
+.clean-error-banner {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   padding: 10px 12px;
   border-radius: 8px;
   margin-bottom: 16px;
 }
 
-/* Adaptabilidad a dispositivos móviles */
-@media (max-width: 960px) {
-  .asys-auth-container {
-    grid-template-columns: 1fr;
-  }
-  .auth-stage-side {
-    display: none;
-  }
+@media (max-width: 900px) {
+  .login-split-container { grid-template-columns: 1fr; }
+  .login-visual-side { display: none; }
+}
+
+.app-brand-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  border: 1.5px solid var(--border-light);
+  box-shadow: 0 4px 12px rgba(21, 84, 255, 0.15);
 }
