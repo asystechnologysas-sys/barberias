@@ -83,7 +83,7 @@ export default function Login() {
           {/* Logo ASYS con border-radius 50% */}
           <div className="app-brand-header">
             <img
-              src="frontend\src\pages\logoAsys.png"
+              src="/logoASYS.png"
               alt="ASYS Barber"
               className="app-brand-avatar"
             />
