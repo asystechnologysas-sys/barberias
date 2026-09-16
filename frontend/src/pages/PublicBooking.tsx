@@ -23,12 +23,15 @@ export default function PublicBooking() {
   const [loadingHours, setLoadingHours] = useState(false);
   const [confirmSuccess, setConfirmSuccess] = useState(false);
 
+  // Mapa de disponibilidad para colorear cada día del almanaque
+  const [dayStatsMap, setDayStatsMap] = useState<{ [dateStr: string]: { freeCount: number; total: number } }>({});
+
   // Sesión del cliente
   const token = localStorage.getItem('asys_token');
   const userStr = localStorage.getItem('asys_user');
   const currentUser = userStr ? JSON.parse(userStr) : null;
 
-  // Horarios de la jornada (09:00 a 19:00)
+  // Horarios de la jornada estándar (10 turnos posibles al día)
   const masterDayHours = ['09:00', '10:00', '11:00', '12:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
 
   useEffect(() => {
@@ -42,7 +45,7 @@ export default function PublicBooking() {
       .catch(() => setLoading(false));
   }, [slug]);
 
-  // Generación matemática de los días del mes (próximos 7 días habilitados)
+  // Generar próximos 7 días habilitados
   const today = new Date();
   const currentMonthDays = Array.from({ length: 30 }, (_, i) => {
     const d = new Date(today.getFullYear(), today.getMonth(), i + 1);
@@ -58,7 +61,19 @@ export default function PublicBooking() {
     };
   });
 
-  // Al hacer clic en un día se abre el modal arriba
+  // Normalizador de horas (convierte "2026-09-17T09:00:00.000Z" o "09:00" a "09:00")
+  const normalizeHour = (rawTime: string) => {
+    if (!rawTime) return '';
+    if (rawTime.includes('T')) {
+      const d = new Date(rawTime);
+      const h = String(d.getHours()).padStart(2, '0');
+      const m = String(d.getMinutes()).padStart(2, '0');
+      return `${h}:${m}`;
+    }
+    return rawTime.slice(0, 5);
+  };
+
+  // Al hacer clic en un día se abre el modal flotante en el centro
   const handleDaySelect = async (day: any) => {
     if (!day.inRange) return;
     setSelectedDate(day.dateStr);
@@ -67,13 +82,19 @@ export default function PublicBooking() {
     setShowHoursModal(true);
 
     try {
-      // Consulta real al endpoint de disponibilidad del backend
+      // Petición real al backend
       const data = await api.get(`/api/public/${slug}/availability?date=${day.dateStr}&barberId=${selectedBarber || ''}`);
-      const serverTimes = data.map((item: any) => item.time);
-      setFreeHours(serverTimes.length > 0 ? serverTimes : ['09:00', '10:00', '11:00', '14:00', '15:00', '17:00']);
+      
+      if (Array.isArray(data) && data.length > 0) {
+        const parsed = data.map((item: any) => normalizeHour(item.time));
+        setFreeHours(parsed);
+      } else {
+        // Si el barbero aún no ha bloqueado horas, toda la jornada está libre
+        setFreeHours(masterDayHours);
+      }
     } catch {
-      // Fallback seguro
-      setFreeHours(['10:00', '11:00', '14:00', '16:00']);
+      // Fallback: todas las horas libres por defecto
+      setFreeHours(masterDayHours);
     } finally {
       setLoadingHours(false);
     }
@@ -81,12 +102,12 @@ export default function PublicBooking() {
 
   const handlePickHour = (hour: string) => {
     setSelectedTime(hour);
-    setShowHoursModal(false); // Cierra la ventana flotante automáticamente
+    setShowHoursModal(false); // Cierra la ventana emergente automáticamente
   };
 
   const handleConfirmAppointment = async () => {
     if (!token) {
-      alert('Por favor inicia sesión con tu celular para registrar tu turno.');
+      alert('Debes iniciar sesión con tu cuenta para confirmar tu cita.');
       navigate('/login');
       return;
     }
@@ -100,18 +121,44 @@ export default function PublicBooking() {
       });
       setConfirmSuccess(true);
     } catch (err: any) {
-      alert(err.message || 'Error al confirmar cita');
+      alert(err.message || 'Error al confirmar la cita');
     }
   };
 
+  // Función de cierre de sesión con redirección inmediata al login
   const handleLogout = () => {
     localStorage.removeItem('asys_token');
     localStorage.removeItem('asys_user');
-    window.location.reload();
+    navigate('/login'); // <-- Redirige de inmediato a la pantalla de login
+  };
+
+  // Cálculo de clase de color del semáforo para cada celda
+  const getDayStatusClass = (day: any) => {
+    if (!day.inRange) return 'cell-disabled';
+    
+    // Si hay datos en el mapa de ocupación se calculan, si no, como el barbero no ha hecho nada está 100% libre (>80% = verde)
+    const stats = dayStatsMap[day.dateStr];
+    if (!stats) return 'status-green';
+
+    const freePercentage = stats.freeCount / stats.total;
+    if (stats.freeCount === 0) return 'status-red';
+    if (freePercentage <= 0.5) return 'status-yellow';
+    return 'status-green';
+  };
+
+  const getDayStatusLabel = (day: any) => {
+    if (day.isSunday) return <span className="cal-cell-status closed">Cerrado</span>;
+    if (!day.inRange) return <span className="cal-cell-status closed">Inactivo</span>;
+
+    const stats = dayStatsMap[day.dateStr];
+    if (stats && stats.freeCount === 0) {
+      return <span className="cal-cell-status full">Lleno ●</span>;
+    }
+    return <span className="cal-cell-status free">Disponible ●</span>;
   };
 
   if (loading) {
-    return <div style={{ padding: 100, textAlign: 'center', color: '#64748b' }}>Cargando portal de la barbería...</div>;
+    return <div style={{ padding: 100, textAlign: 'center', color: '#64748b' }}>Cargando barbería...</div>;
   }
 
   if (!org) {
@@ -121,7 +168,7 @@ export default function PublicBooking() {
   return (
     <div className="client-page-wrap">
       
-      {/* 1. ENCABEZADO SUPERIOR LIMPIO */}
+      {/* 1. ENCABEZADO CON BOTÓN DE CERRAR SESIÓN REDISEÑADO */}
       <header className="client-top-bar">
         <div className="client-brand-area">
           <div className="barber-logo-placeholder">
@@ -141,11 +188,13 @@ export default function PublicBooking() {
 
         <div>
           {token ? (
-            <button onClick={handleLogout} className="btn-dark">
-              <LogOut size={14} /> Cerrar sesión
+            <button onClick={handleLogout} className="btn-logout-modern" title="Cerrar sesión y volver al login">
+              <LogOut size={15} /> Cerrar sesión
             </button>
           ) : (
-            <Link to="/login" className="btn-gold">Iniciar Sesión</Link>
+            <Link to="/login" className="btn-clean-submit" style={{ padding: '8px 20px', textDecoration: 'none', display: 'inline-block' }}>
+              Iniciar Sesión
+            </Link>
           )}
         </div>
       </header>
@@ -153,7 +202,7 @@ export default function PublicBooking() {
       {/* 2. CUERPO PRINCIPAL */}
       <div className="client-content-container">
         
-        {/* Selector de Servicios si hay más de uno */}
+        {/* Selector de Servicios */}
         {org.services?.length > 1 && (
           <div style={{ display: 'flex', gap: 10, marginBottom: 24, overflowX: 'auto', paddingBottom: 4 }}>
             {org.services.map((svc: any) => (
@@ -161,7 +210,14 @@ export default function PublicBooking() {
                 key={svc.id}
                 onClick={() => setSelectedService(svc)}
                 className={`clean-tab-btn ${selectedService?.id === svc.id ? 'active' : ''}`}
-                style={{ background: selectedService?.id === svc.id ? '#1554ff' : '#ffffff', color: selectedService?.id === svc.id ? '#fff' : '#0b1020', border: '1px solid #e2e8f0', borderRadius: 20, padding: '8px 18px' }}
+                style={{
+                  background: selectedService?.id === svc.id ? '#1554ff' : '#ffffff',
+                  color: selectedService?.id === svc.id ? '#fff' : '#0b1020',
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: 30,
+                  padding: '10px 22px',
+                  fontWeight: 700
+                }}
               >
                 {svc.name} · ${Number(svc.price).toLocaleString('es-CO')}
               </button>
@@ -188,24 +244,19 @@ export default function PublicBooking() {
             </div>
 
             <div className="cal-days-grid">
-              {currentMonthDays.map((d, index) => (
-                <div
-                  key={index}
-                  onClick={() => handleDaySelect(d)}
-                  className={`cal-cell ${!d.inRange ? 'cell-disabled' : ''} ${selectedDate === d.dateStr ? 'cell-selected' : ''}`}
-                >
-                  <div className="cal-cell-num">{d.dayNum}</div>
-                  <div className="cal-cell-status">
-                    {d.isSunday ? (
-                      <span className="cal-cell-status closed">Cerrado</span>
-                    ) : !d.inRange ? (
-                      <span className="cal-cell-status closed">Inactivo</span>
-                    ) : (
-                      <span className="cal-cell-status free">Disponible ●</span>
-                    )}
+              {currentMonthDays.map((d, index) => {
+                const statusClass = getDayStatusClass(d);
+                return (
+                  <div
+                    key={index}
+                    onClick={() => handleDaySelect(d)}
+                    className={`cal-cell ${statusClass} ${selectedDate === d.dateStr ? 'cell-selected' : ''}`}
+                  >
+                    <div className="cal-cell-num">{d.dayNum}</div>
+                    <div>{getDayStatusLabel(d)}</div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -257,7 +308,7 @@ export default function PublicBooking() {
       </div>
 
       {/* =========================================================
-          3. VENTANA MODAL FLOTANTE (ARRIBA EN EL CENTRO)
+          3. VENTANA MODAL FLOTANTE ARRIBA DE TODO
           ========================================================= */}
       {showHoursModal && (
         <div className="modal-hours-overlay">
@@ -272,7 +323,7 @@ export default function PublicBooking() {
                   Selecciona una hora disponible para tu cita.
                 </p>
               </div>
-              <button onClick={() => setShowHoursModal(false)} className="btn-dark" style={{ padding: '6px 10px' }}>
+              <button onClick={() => setShowHoursModal(false)} className="btn-logout-modern" style={{ padding: '6px 10px' }}>
                 <X size={18} />
               </button>
             </div>
@@ -314,12 +365,7 @@ export default function PublicBooking() {
               className="btn-clean-submit"
               style={{ marginTop: 20 }}
             >
-              Entendido
+              Aceptar
             </button>
           </div>
         </div>
-      )}
-
-    </div>
-  );
-}

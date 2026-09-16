@@ -625,3 +625,105 @@ h1, h2, h3, b, .font-sora {
   .client-grid { grid-template-columns: 1fr; }
   .modal-hours-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* =========================================================
+   ESTILOS DE DISPONIBILIDAD (SEMÁFORO) Y BOTÓN DE SALIDA
+   ========================================================= */
+
+/* Botón moderno Cerrar Sesión */
+.btn-logout-modern {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  color: #475569;
+  padding: 8px 18px;
+  border-radius: 30px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.btn-logout-modern:hover {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #ef4444;
+  transform: translateY(-1px);
+}
+
+/* Colores de las celdas del Almanaque según ocupación */
+.cal-cell.status-green {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+.cal-cell.status-green .cal-cell-status {
+  color: #16a34a;
+}
+.cal-cell.status-green:hover {
+  border-color: #16a34a;
+  background: #dcfce7;
+}
+
+.cal-cell.status-yellow {
+  background: #fefce8;
+  border-color: #fef08a;
+}
+.cal-cell.status-yellow .cal-cell-status {
+  color: #ca8a04;
+}
+.cal-cell.status-yellow:hover {
+  border-color: #ca8a04;
+  background: #fef9c3;
+}
+
+.cal-cell.status-red {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+.cal-cell.status-red .cal-cell-status {
+  color: #dc2626;
+}
+.cal-cell.status-red:hover {
+  border-color: #dc2626;
+}
+
+/* Celda seleccionada (predomina sobre el color base) */
+.cal-cell.cell-selected {
+  border: 2px solid var(--primary-blue) !important;
+  background: #eff6ff !important;
+  box-shadow: 0 0 0 3px rgba(21, 84, 255, 0.15);
+}
+
+/* Botones de horas en el Modal */
+.btn-hour-slot {
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  color: #0b1020;
+  padding: 14px 8px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.btn-hour-slot:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: var(--primary-blue);
+  color: var(--primary-blue);
+  transform: translateY(-1px);
+}
+
+.btn-hour-slot:disabled {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #94a3b8;
+  text-decoration: line-through;
+  cursor: not-allowed;
+  opacity: 0.45;
+}
