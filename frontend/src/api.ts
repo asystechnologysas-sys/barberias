@@ -24,6 +24,21 @@ export const api = {
     if (!res.ok) throw new Error(data.error?.message || 'Error en la solicitud');
     return data.data;
   },
+  put: async (url: string, body: any) => {
+    const cleanUrl = url.startsWith('/') ? url : `/${url}`;
+    const token = localStorage.getItem('asys_token');
+    const res = await fetch(cleanUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || 'Error al guardar');
+    return data.data;
+  },
   patch: async (url: string, body: any) => {
     const cleanUrl = url.startsWith('/') ? url : `/${url}`;
     const token = localStorage.getItem('asys_token');

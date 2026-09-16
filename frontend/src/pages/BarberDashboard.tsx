@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Users, LogOut, Lock, Unlock, X, ChevronLeft, ChevronRight, AlertTriangle, ShieldAlert, Crown, Settings, MessageSquare, Save, Check } from 'lucide-react';
+import { Calendar, Users, LogOut, Lock, Unlock, X, ChevronLeft, ChevronRight, AlertTriangle, ShieldAlert, Crown, Settings, MessageSquare, Save, CheckCircle2, AlertCircle } from 'lucide-react';
 import { api } from '../api';
 
 export default function BarberDashboard() {
@@ -32,9 +32,14 @@ export default function BarberDashboard() {
 
   const [confirmModal, setConfirmModal] = useState<{ open: boolean; id: string; name: string } | null>(null);
   const [blockDayModal, setBlockDayModal] = useState(false);
-  const [saveSettingsSuccess, setSaveSettingsSuccess] = useState(false);
 
-  // Lista ampliada hasta las 20:00 (incluye las 7:00 PM / 19:00)
+  // Modal Flotante de Notificaciones ASYS
+  const [alertModal, setAlertModal] = useState<{ open: boolean; title: string; message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showAlert = (title: string, message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setAlertModal({ open: true, title, message, type });
+  };
+
   const masterHours = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
   const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
@@ -55,7 +60,6 @@ export default function BarberDashboard() {
       setServices(svcs || []);
       if (clients?.length && !selectedClientId) setSelectedClientId(clients[0].id);
 
-      // Si no hay horarios aún, inicializar los 7 días
       if (scheds && scheds.length > 0) {
         setWeeklySchedules(scheds);
       } else {
@@ -63,7 +67,7 @@ export default function BarberDashboard() {
           weekday: i,
           openTime: '09:00',
           closeTime: '20:00',
-          closed: i === 0 // Domingo cerrado por defecto
+          closed: false
         }));
         setWeeklySchedules(defaults);
       }
@@ -122,9 +126,10 @@ export default function BarberDashboard() {
       const endsAt = new Date(startsAt.getTime() + 60 * 60 * 1000);
       await api.post('/api/blocks', { startsAt, endsAt, reason: blockReason });
       setBlockModalOpen(false);
+      showAlert('Hora Bloqueada', `La franja de las ${slotToBlock} quedó bloqueada para el ${selectedDate}.`);
       loadData();
     } catch (err: any) {
-      alert(err.message || 'Error al bloquear');
+      showAlert('Error al bloquear', err.message || 'No se pudo bloquear la hora', 'error');
     }
   };
 
@@ -132,27 +137,30 @@ export default function BarberDashboard() {
     try {
       await api.post('/api/blocks/day', { dateStr: selectedDate, reason: 'Día Cerrado' });
       setBlockDayModal(false);
+      showAlert('Día Cerrado', `El día ${selectedDate} fue cerrado completamente para reservas.`);
       loadData();
     } catch (err: any) {
-      alert(err.message || 'Error al cerrar el día');
+      showAlert('Error', err.message || 'No se pudo cerrar el día', 'error');
     }
   };
 
   const handleReopenDay = async () => {
     try {
       await api.delete(`/api/blocks/day/${selectedDate}`);
+      showAlert('Día Reabierto', `El día ${selectedDate} vuelve a estar disponible para citas.`);
       loadData();
     } catch (err: any) {
-      alert(err.message || 'Error al reabrir día');
+      showAlert('Error', err.message || 'No se pudo reabrir el día', 'error');
     }
   };
 
   const handleUnblock = async (blockId: string) => {
     try {
       await api.delete(`/api/blocks/${blockId}`);
+      showAlert('Hora Liberada', 'La franja horaria vuelve a estar disponible para clientes.');
       loadData();
     } catch (err: any) {
-      alert(err.message || 'Error al liberar hora');
+      showAlert('Error', err.message || 'No se pudo liberar la hora', 'error');
     }
   };
 
@@ -161,14 +169,15 @@ export default function BarberDashboard() {
     try {
       await api.patch(`/api/appointments/${confirmModal.id}/cancel`, {});
       setConfirmModal(null);
+      showAlert('Cita Cancelada', 'La cita fue cancelada y la hora quedó libre para otros clientes.');
       loadData();
     } catch (err: any) {
-      alert(err.message || 'Error al cancelar');
+      showAlert('Error', err.message || 'No se pudo cancelar', 'error');
     }
   };
 
   const handleCreateVip = async () => {
-    if (!selectedClientId) return alert('Selecciona un cliente de la lista.');
+    if (!selectedClientId) return showAlert('Atención', 'Selecciona un cliente de la lista.', 'info');
     try {
       await api.post('/api/vip', {
         clientId: selectedClientId,
@@ -176,32 +185,30 @@ export default function BarberDashboard() {
         time: newVipTime
       });
       setVipModalOpen(false);
+      showAlert('Cliente VIP Asignado', 'El turno fijo semanal quedó registrado con éxito.');
       loadData();
     } catch (err: any) {
-      alert(err.message || 'Error al asignar VIP');
+      showAlert('Error al asignar VIP', err.message || 'No se pudo registrar', 'error');
     }
   };
 
-  // Guardar configuración de horarios semanales
   const handleSaveSchedules = async () => {
     try {
       await api.put('/api/schedules', { schedules: weeklySchedules });
-      setSaveSettingsSuccess(true);
-      setTimeout(() => setSaveSettingsSuccess(false), 3000);
+      showAlert('¡Horarios Guardados!', 'La configuración semanal de apertura y cierre fue actualizada en la base de datos.');
       loadData();
     } catch (err: any) {
-      alert(err.message || 'Error al guardar horarios');
+      showAlert('Error al guardar', err.message || 'No se pudo guardar la configuración', 'error');
     }
   };
 
-  // Actualizar precio de servicio
-  const handleUpdateServicePrice = async (serviceId: string, newPrice: number, newDuration: number) => {
+  const handleUpdateCortePrice = async (serviceId: string, newPrice: number) => {
     try {
-      await api.patch(`/api/services/${serviceId}`, { price: newPrice, durationMinutes: newDuration });
-      alert('Servicio actualizado con éxito');
+      await api.patch(`/api/services/${serviceId}`, { price: newPrice });
+      showAlert('Tarifa Actualizada', `El precio del corte ahora es de $${newPrice.toLocaleString('es-CO')} COP.`);
       loadData();
     } catch (err: any) {
-      alert(err.message || 'Error al actualizar servicio');
+      showAlert('Error al actualizar', err.message || 'No se pudo actualizar el precio', 'error');
     }
   };
 
@@ -219,11 +226,12 @@ export default function BarberDashboard() {
   });
 
   const selectedDateDayOfWeek = new Date(`${selectedDate}T12:00:00-05:00`).getDay();
+  const corteService = services.find(s => s.name.toLowerCase().includes('corte')) || services[0];
 
   return (
     <div className="admin-page-wrap">
       
-      {/* 1. ENCABEZADO SUPERIOR */}
+      {/* 1. ENCABEZADO */}
       <header className="client-top-bar">
         <div className="client-brand-area">
           <div className="barber-logo-placeholder">AS</div>
@@ -466,7 +474,7 @@ export default function BarberDashboard() {
             </div>
           )}
 
-          {/* PESTAÑA 3: MIS CLIENTES CON DISEÑO PREMIUM */}
+          {/* PESTAÑA 3: MIS CLIENTES */}
           {activeTab === 'clients' && (
             <div className="table-card-saas">
               <div className="table-saas-header">
@@ -482,10 +490,10 @@ export default function BarberDashboard() {
                   <thead>
                     <tr>
                       <th>Cliente</th>
-                      <th>Celular (WhatsApp)</th>
+                      <th>Celular</th>
                       <th>Citas Acumuladas</th>
                       <th>Estado</th>
-                      <th style={{ textAlign: 'right' }}>Contacto Directo</th>
+                      <th style={{ textAlign: 'right' }}>WhatsApp</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -538,29 +546,22 @@ export default function BarberDashboard() {
             </div>
           )}
 
-          {/* PESTAÑA 4: CONFIGURACIÓN DE HORARIOS SEMANALES Y PRECIOS */}
+          {/* PESTAÑA 4: HORARIOS Y PRECIO DEL CORTE */}
           {activeTab === 'settings' && (
             <div>
-              {/* Horarios semanales por día */}
               <div className="client-calendar-card" style={{ marginBottom: 24 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                   <div>
                     <span className="cal-eyebrow">JORNADA SEMANAL</span>
                     <h2 style={{ fontFamily: 'Sora', fontSize: 22 }}>Horarios de Apertura por Día</h2>
                     <p style={{ color: '#64748b', fontSize: 13, marginTop: 4 }}>
-                      Configura qué días abres tu barbería de forma fija y en qué horario.
+                      Activa o desactiva días fijos y define a qué hora abres y cierras cada día.
                     </p>
                   </div>
                   <button onClick={handleSaveSchedules} className="btn-clean-submit" style={{ width: 'auto', padding: '10px 22px' }}>
                     <Save size={15} style={{ display: 'inline', marginRight: 6 }} /> Guardar Horarios
                   </button>
                 </div>
-
-                {saveSettingsSuccess && (
-                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#16a34a', padding: '10px 16px', borderRadius: 10, fontSize: 13, fontWeight: 700, marginBottom: 16 }}>
-                    ✓ ¡Horarios de apertura guardados con éxito en la base de datos!
-                  </div>
-                )}
 
                 <div>
                   {weeklySchedules.map((s, idx) => (
@@ -629,60 +630,40 @@ export default function BarberDashboard() {
                 </div>
               </div>
 
-              {/* Precios y duración de servicios */}
-              <div className="client-calendar-card">
-                <span className="cal-eyebrow">CATÁLOGO Y TARIFAS</span>
-                <h2 style={{ fontFamily: 'Sora', fontSize: 22, marginBottom: 8 }}>Precios de Servicios e Intervalos</h2>
-                <p style={{ color: '#64748b', fontSize: 13, marginBottom: 20 }}>
-                  Cambia el valor de tus cortes o la duración de cada turno (30 min, 45 min o 60 min).
-                </p>
+              {/* ÚNICAMENTE CONFIGURACIÓN DEL CORTE */}
+              {corteService && (
+                <div className="client-calendar-card">
+                  <span className="cal-eyebrow">TARIFA PRINCIPAL</span>
+                  <h2 style={{ fontFamily: 'Sora', fontSize: 22, marginBottom: 8 }}>Precio del Corte</h2>
+                  <p style={{ color: '#64748b', fontSize: 13, marginBottom: 20 }}>
+                    Define el valor del corte en pesos colombianos. Los clientes verán este precio actualizado de inmediato.
+                  </p>
 
-                {services.map(svc => (
-                  <div key={svc.id} className="service-edit-card">
-                    <div>
-                      <b style={{ fontSize: 15, display: 'block' }}>{svc.name}</b>
-                      <small style={{ color: '#64748b' }}>Servicio activo para agendamiento</small>
-                    </div>
-
-                    <div>
-                      <span style={{ fontSize: 11, color: '#64748b', display: 'block' }}>Precio (COP)</span>
+                  <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', maxWidth: 460 }}>
+                    <div style={{ flex: 1 }}>
+                      <label className="input-label">Precio del Corte (COP)</label>
                       <input
                         type="number"
-                        defaultValue={svc.price}
-                        id={`price-${svc.id}`}
+                        defaultValue={corteService.price}
+                        id={`price-${corteService.id}`}
                         className="clean-input"
-                        style={{ padding: '8px 10px', fontSize: 14 }}
+                        placeholder="Ej. 25000"
                       />
-                    </div>
-
-                    <div>
-                      <span style={{ fontSize: 11, color: '#64748b', display: 'block' }}>Duración / Intervalo</span>
-                      <select
-                        defaultValue={svc.durationMinutes}
-                        id={`dur-${svc.id}`}
-                        className="clean-input"
-                        style={{ padding: '8px 10px', fontSize: 13 }}
-                      >
-                        <option value={30}>30 Minutos</option>
-                        <option value={45}>45 Minutos</option>
-                        <option value={60}>60 Minutos (1 Hora)</option>
-                      </select>
                     </div>
 
                     <button
                       onClick={() => {
-                        const newPrice = Number((document.getElementById(`price-${svc.id}`) as HTMLInputElement).value);
-                        const newDur = Number((document.getElementById(`dur-${svc.id}`) as HTMLSelectElement).value);
-                        handleUpdateServicePrice(svc.id, newPrice, newDur);
+                        const newPrice = Number((document.getElementById(`price-${corteService.id}`) as HTMLInputElement).value);
+                        handleUpdateCortePrice(corteService.id, newPrice);
                       }}
-                      className="btn-action-sm btn-unblock"
-                      style={{ padding: '10px 16px', height: 'fit-content' }}
+                      className="btn-clean-submit"
+                      style={{ width: 'auto', padding: '13px 24px' }}
                     >
-                      Actualizar Tarifa
+                      Actualizar Precio
                     </button>
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -798,6 +779,26 @@ export default function BarberDashboard() {
               <button onClick={() => setConfirmModal(null)} className="btn-dark" style={{ width: '50%' }}>No, mantener</button>
               <button onClick={handleCancelAppointment} className="btn-action-sm btn-cancel" style={{ width: '50%', padding: 12 }}>Sí, cancelar</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* VENTANA MODAL DE ALERTAS ASYS */}
+      {alertModal && alertModal.open && (
+        <div className="modal-hours-overlay">
+          <div className="asys-alert-modal">
+            <div className={`asys-alert-icon ${alertModal.type}`}>
+              {alertModal.type === 'success' && <CheckCircle2 size={32} />}
+              {alertModal.type === 'error' && <AlertCircle size={32} />}
+              {alertModal.type === 'info' && <CheckCircle2 size={32} />}
+            </div>
+            <h3 style={{ fontFamily: 'Sora', fontSize: 20, marginBottom: 8, color: '#0b1020' }}>{alertModal.title}</h3>
+            <p style={{ color: '#64748b', fontSize: 14, lineHeight: 1.5, marginBottom: 22 }}>
+              {alertModal.message}
+            </p>
+            <button onClick={() => setAlertModal(null)} className="btn-clean-submit">
+              Aceptar
+            </button>
           </div>
         </div>
       )}
