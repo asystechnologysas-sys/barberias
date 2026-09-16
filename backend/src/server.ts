@@ -245,6 +245,31 @@ app.post('/api/superadmin/organizations', auth, role(Role.SUPERADMIN), asyncRout
   res.status(201).json({ success: true, data: await db.organization.create({ data: v }) });
 }));
 
+// Listar bloqueos del barbero
+app.get('/api/blocks', auth, activeTenant, role(Role.OWNER, Role.BARBER), asyncRoute(async (req, res) => {
+  const blocks = await db.blockedSlot.findMany({
+    where: { organizationId: req.auth!.organizationId! },
+    orderBy: { startsAt: 'asc' }
+  });
+  res.json({ success: true, data: blocks });
+}));
+
+// Eliminar un bloqueo (liberar la hora)
+app.delete('/api/blocks/:id', auth, activeTenant, role(Role.OWNER, Role.BARBER), asyncRoute(async (req, res) => {
+  await db.blockedSlot.deleteMany({
+    where: { id: String(req.params.id), organizationId: req.auth!.organizationId! }
+  });
+  res.json({ success: true });
+}));
+
+// Eliminar cliente VIP
+app.delete('/api/vip/:id', auth, activeTenant, role(Role.OWNER, Role.BARBER), asyncRoute(async (req, res) => {
+  await db.vipSchedule.deleteMany({
+    where: { id: String(req.params.id), organizationId: req.auth!.organizationId! }
+  });
+  res.json({ success: true });
+}));
+
 app.patch('/api/superadmin/organizations/:id', auth, role(Role.SUPERADMIN), asyncRoute(async (req, res) => {
   const v = z.object({
     status: z.nativeEnum(OrganizationStatus).optional(),

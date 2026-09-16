@@ -999,3 +999,191 @@ h1, h2, h3, b, .font-sora {
     font-size: 13px;
   }
 }
+
+/* =========================================================
+   PANEL MASTER DEL BARBERO - ESTILO BLANCO / AZUL ASYS
+   ========================================================= */
+.admin-page-wrap {
+  background-color: #f8fafc;
+  min-height: 100vh;
+  color: var(--text-dark);
+  padding-bottom: 70px;
+}
+
+.admin-layout-clean {
+  max-width: 1300px;
+  margin: 28px auto 0;
+  padding: 0 20px;
+  display: grid;
+  grid-template-columns: 290px 1fr;
+  gap: 24px;
+}
+
+.admin-sidebar-card {
+  background: #ffffff;
+  border: 1px solid var(--border-light);
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.05);
+  height: fit-content;
+}
+
+.admin-nav-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  background: #f8fafc;
+  color: #475569;
+  transition: all 0.2s ease;
+  margin-bottom: 8px;
+}
+
+.admin-nav-btn.active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: var(--primary-blue);
+}
+
+.admin-nav-btn:hover:not(.active) {
+  background: #f1f5f9;
+  color: var(--text-dark);
+}
+
+/* Grilla Máster de Horarios del Barbero */
+.master-slots-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.master-slot-row {
+  background: #ffffff;
+  border: 1.5px solid var(--border-light);
+  border-radius: 14px;
+  padding: 14px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.2s ease;
+}
+
+.master-slot-row.slot-free {
+  border-left: 5px solid #10b981;
+}
+
+.master-slot-row.slot-booked {
+  border-left: 5px solid #1554ff;
+  background: #f8fbff;
+}
+
+.master-slot-row.slot-blocked {
+  border-left: 5px solid #94a3b8;
+  background: #f1f5f9;
+}
+
+.slot-time-badge {
+  font-family: 'Sora', sans-serif;
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--text-dark);
+  min-width: 80px;
+}
+
+.slot-status-pill {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.slot-status-pill.free {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.slot-status-pill.booked {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.slot-status-pill.blocked {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+/* Botones de acción del barbero */
+.btn-action-sm {
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.btn-action-sm.btn-block {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+.btn-action-sm.btn-block:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.btn-action-sm.btn-unblock {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+.btn-action-sm.btn-unblock:hover {
+  background: #dbeafe;
+}
+
+.btn-action-sm.btn-cancel {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #dc2626;
+}
+.btn-action-sm.btn-cancel:hover {
+  background: #fee2e2;
+}
+
+/* Tarjetas VIP Estilo ASYS */
+.vip-card-clean {
+  background: #ffffff;
+  border: 1px solid var(--border-light);
+  border-radius: 14px;
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.vip-badge-blue {
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-left: 8px;
+}
+
+@media (max-width: 900px) {
+  .admin-layout-clean { grid-template-columns: 1fr; }
+  .master-slot-row { flex-direction: column; align-items: flex-start; gap: 10px; }
+}
