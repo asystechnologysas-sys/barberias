@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Users, LogOut, Lock, Unlock, X, ChevronLeft, ChevronRight, AlertTriangle, ShieldAlert, Crown, Phone, MessageSquare } from 'lucide-react';
+import { Calendar, Users, LogOut, Lock, Unlock, X, ChevronLeft, ChevronRight, AlertTriangle, ShieldAlert, Crown, Settings, MessageSquare, Save, Check } from 'lucide-react';
 import { api } from '../api';
 
 export default function BarberDashboard() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'schedule' | 'vips' | 'clients'>('schedule');
+  const [activeTab, setActiveTab] = useState<'schedule' | 'vips' | 'clients' | 'settings'>('schedule');
 
   const userStr = localStorage.getItem('asys_user');
   const currentUser = userStr ? JSON.parse(userStr) : null;
@@ -17,6 +17,8 @@ export default function BarberDashboard() {
   const [blocks, setBlocks] = useState<any[]>([]);
   const [vips, setVips] = useState<any[]>([]);
   const [clientList, setClientList] = useState<any[]>([]);
+  const [services, setServices] = useState<any[]>([]);
+  const [weeklySchedules, setWeeklySchedules] = useState<any[]>([]);
 
   // Modales
   const [blockModalOpen, setBlockModalOpen] = useState(false);
@@ -30,22 +32,41 @@ export default function BarberDashboard() {
 
   const [confirmModal, setConfirmModal] = useState<{ open: boolean; id: string; name: string } | null>(null);
   const [blockDayModal, setBlockDayModal] = useState(false);
+  const [saveSettingsSuccess, setSaveSettingsSuccess] = useState(false);
 
-  const masterHours = ['09:00', '10:00', '11:00', '12:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
+  // Lista ampliada hasta las 20:00 (incluye las 7:00 PM / 19:00)
+  const masterHours = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
+  const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
   const loadData = async () => {
     try {
-      const [appData, blockData, vipData, clients] = await Promise.all([
+      const [appData, blockData, vipData, clients, svcs, scheds] = await Promise.all([
         api.get('/api/appointments').catch(() => []),
         api.get('/api/blocks').catch(() => []),
         api.get('/api/vip').catch(() => []),
-        api.get('/api/clients').catch(() => [])
+        api.get('/api/clients').catch(() => []),
+        api.get('/api/services').catch(() => []),
+        api.get('/api/schedules').catch(() => [])
       ]);
       setAppointments(appData || []);
       setBlocks(blockData || []);
       setVips(vipData || []);
       setClientList(clients || []);
+      setServices(svcs || []);
       if (clients?.length && !selectedClientId) setSelectedClientId(clients[0].id);
+
+      // Si no hay horarios aún, inicializar los 7 días
+      if (scheds && scheds.length > 0) {
+        setWeeklySchedules(scheds);
+      } else {
+        const defaults = Array.from({ length: 7 }, (_, i) => ({
+          weekday: i,
+          openTime: '09:00',
+          closeTime: '20:00',
+          closed: i === 0 // Domingo cerrado por defecto
+        }));
+        setWeeklySchedules(defaults);
+      }
     } catch (err) {
       console.error(err);
     }
@@ -78,6 +99,8 @@ export default function BarberDashboard() {
       return bStart <= new Date(`${dateStr}T00:00:00-05:00`) && bEnd >= new Date(`${dateStr}T23:59:59-05:00`);
     });
 
+    const isRecurringClosed = weeklySchedules.find(s => s.weekday === dayOfWeek)?.closed;
+
     const dayApts = appointments.filter(a => a.startsAt.startsWith(dateStr) && a.status === 'CONFIRMED');
     const dayVips = vips.filter(v => {
       if (v.weekday !== dayOfWeek) return false;
@@ -88,7 +111,7 @@ export default function BarberDashboard() {
     return {
       dayNum: i + 1,
       dateStr,
-      isFullDayClosed,
+      isClosed: isFullDayClosed || isRecurringClosed,
       totalOccupied: dayApts.length + dayVips.length
     };
   });
@@ -159,6 +182,29 @@ export default function BarberDashboard() {
     }
   };
 
+  // Guardar configuración de horarios semanales
+  const handleSaveSchedules = async () => {
+    try {
+      await api.put('/api/schedules', { schedules: weeklySchedules });
+      setSaveSettingsSuccess(true);
+      setTimeout(() => setSaveSettingsSuccess(false), 3000);
+      loadData();
+    } catch (err: any) {
+      alert(err.message || 'Error al guardar horarios');
+    }
+  };
+
+  // Actualizar precio de servicio
+  const handleUpdateServicePrice = async (serviceId: string, newPrice: number, newDuration: number) => {
+    try {
+      await api.patch(`/api/services/${serviceId}`, { price: newPrice, durationMinutes: newDuration });
+      alert('Servicio actualizado con éxito');
+      loadData();
+    } catch (err: any) {
+      alert(err.message || 'Error al actualizar servicio');
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('asys_token');
     localStorage.removeItem('asys_user');
@@ -177,6 +223,7 @@ export default function BarberDashboard() {
   return (
     <div className="admin-page-wrap">
       
+      {/* 1. ENCABEZADO SUPERIOR */}
       <header className="client-top-bar">
         <div className="client-brand-area">
           <div className="barber-logo-placeholder">AS</div>
@@ -190,6 +237,7 @@ export default function BarberDashboard() {
         </button>
       </header>
 
+      {/* 2. CUERPO PRINCIPAL */}
       <div className="admin-layout-clean">
         
         {/* BARRA LATERAL */}
@@ -228,11 +276,15 @@ export default function BarberDashboard() {
             <button onClick={() => setActiveTab('clients')} className={`admin-nav-btn ${activeTab === 'clients' ? 'active' : ''}`}>
               <Users size={16} /> Mis Clientes
             </button>
+            <button onClick={() => setActiveTab('settings')} className={`admin-nav-btn ${activeTab === 'settings' ? 'active' : ''}`}>
+              <Settings size={16} /> Horarios y Precios
+            </button>
           </div>
         </div>
 
         {/* PANEL DERECHO */}
         <div>
+          {/* PESTAÑA 1: ALMANAQUE MÁSTER */}
           {activeTab === 'schedule' && (
             <div className="client-calendar-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -252,7 +304,6 @@ export default function BarberDashboard() {
                 </div>
               </div>
 
-              {/* CALENDARIO */}
               <div className="cal-week-labels">
                 <span>DOM</span><span>LUN</span><span>MAR</span><span>MIE</span><span>JUE</span><span>VIE</span><span>SAB</span>
               </div>
@@ -270,19 +321,18 @@ export default function BarberDashboard() {
                     style={{
                       minHeight: 64,
                       textAlign: 'center',
-                      background: d.isFullDayClosed ? '#fef2f2' : undefined,
-                      borderColor: d.isFullDayClosed ? '#fecaca' : undefined
+                      background: d.isClosed ? '#fef2f2' : undefined,
+                      borderColor: d.isClosed ? '#fecaca' : undefined
                     }}
                   >
                     <div className="cal-cell-num">{d.dayNum}</div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: d.isFullDayClosed ? '#dc2626' : d.totalOccupied > 0 ? '#1554ff' : '#10b981' }}>
-                      {d.isFullDayClosed ? 'Cerrado' : d.totalOccupied > 0 ? `${d.totalOccupied} ocupado(s)` : 'Libre'}
+                    <div style={{ fontSize: 10, fontWeight: 700, color: d.isClosed ? '#dc2626' : d.totalOccupied > 0 ? '#1554ff' : '#10b981' }}>
+                      {d.isClosed ? 'Cerrado' : d.totalOccupied > 0 ? `${d.totalOccupied} ocupado(s)` : 'Libre'}
                     </div>
                   </div>
                 ))}
               </div>
 
-              {/* BARRA DE HERRAMIENTAS */}
               <div style={{ background: '#f8fafc', padding: '14px 18px', borderRadius: 14, border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <b>Horas para: {new Date(selectedDate + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })}</b>
                 
@@ -297,97 +347,87 @@ export default function BarberDashboard() {
                 )}
               </div>
 
-              {/* LISTA DE HORAS DEL DÍA */}
-              {isCurrentSelectedDayClosed ? (
-                <div style={{ background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: 14, padding: 30, textAlign: 'center', color: '#dc2626' }}>
-                  <ShieldAlert size={40} style={{ margin: '0 auto 10px' }} />
-                  <b style={{ fontSize: 16, display: 'block' }}>Este día se encuentra cerrado por completo</b>
-                  <p style={{ fontSize: 13, color: '#7f1d1d', marginTop: 4 }}>Ningún cliente podrá agendar citas en esta fecha.</p>
-                </div>
-              ) : (
-                <div className="master-slots-container">
-                  {masterHours.map(h => {
-                    const apt = appointments.find(a => a.startsAt.startsWith(selectedDate) && getHour(a.startsAt) === h && a.status === 'CONFIRMED');
-                    const blk = blocks.find(b => b.startsAt.startsWith(selectedDate) && getHour(b.startsAt) === h);
-                    
-                    // Si el VIP reprogramó para otra fecha, aquí no sale
-                    const vipSlot = vips.find(v => {
-                      if (v.weekday !== selectedDateDayOfWeek || v.time !== h) return false;
-                      const hasException = v.exceptions?.some((e: any) => new Date(e.date).toISOString().split('T')[0] === selectedDate);
-                      return !hasException;
-                    });
+              <div className="master-slots-container">
+                {masterHours.map(h => {
+                  const apt = appointments.find(a => a.startsAt.startsWith(selectedDate) && getHour(a.startsAt) === h && a.status === 'CONFIRMED');
+                  const blk = blocks.find(b => b.startsAt.startsWith(selectedDate) && getHour(b.startsAt) === h);
+                  
+                  const vipSlot = vips.find(v => {
+                    if (v.weekday !== selectedDateDayOfWeek || v.time !== h) return false;
+                    const hasException = v.exceptions?.some((e: any) => new Date(e.date).toISOString().split('T')[0] === selectedDate);
+                    return !hasException;
+                  });
 
-                    if (apt) {
-                      return (
-                        <div key={h} className="master-slot-row slot-booked">
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                            <span className="slot-time-badge">{h}</span>
-                            <div>
-                              <span className="slot-status-pill booked">● Cita Reservada</span>
-                              <b style={{ display: 'block', fontSize: 15, marginTop: 4, color: '#0b1020' }}>{apt.clientName}</b>
-                              <span style={{ fontSize: 12, color: '#64748b' }}>Tel: {apt.clientPhone} · {apt.service?.name}</span>
-                            </div>
-                          </div>
-                          <button onClick={() => setConfirmModal({ open: true, id: apt.id, name: apt.clientName })} className="btn-action-sm btn-cancel">
-                            Cancelar Cita
-                          </button>
-                        </div>
-                      );
-                    }
-
-                    if (vipSlot) {
-                      return (
-                        <div key={h} className="master-slot-row" style={{ borderLeft: '5px solid #d97706', background: '#fffbeb' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                            <span className="slot-time-badge">{h}</span>
-                            <div>
-                              <span className="slot-status-pill" style={{ background: '#fef3c7', color: '#b45309' }}>👑 Turno Fijo VIP Semanal</span>
-                              <b style={{ display: 'block', fontSize: 15, marginTop: 4, color: '#0b1020' }}>{vipSlot.client?.name}</b>
-                              <span style={{ fontSize: 12, color: '#64748b' }}>Tel: {vipSlot.client?.phone} · Cliente VIP Recurrente</span>
-                            </div>
-                          </div>
-                          <button onClick={() => api.delete(`/api/vip/${vipSlot.id}`).then(loadData)} className="btn-action-sm btn-cancel">
-                            Eliminar Turno VIP
-                          </button>
-                        </div>
-                      );
-                    }
-
-                    if (blk) {
-                      return (
-                        <div key={h} className="master-slot-row slot-blocked">
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                            <span className="slot-time-badge">{h}</span>
-                            <div>
-                              <span className="slot-status-pill blocked">🔒 Bloqueada por ti</span>
-                              <span style={{ display: 'block', fontSize: 12, color: '#64748b', marginTop: 2 }}>Motivo: {blk.reason}</span>
-                            </div>
-                          </div>
-                          <button onClick={() => handleUnblock(blk.id)} className="btn-action-sm btn-unblock">
-                            <Unlock size={12} style={{ display: 'inline', marginRight: 4 }} /> Liberar Hora
-                          </button>
-                        </div>
-                      );
-                    }
-
+                  if (apt) {
                     return (
-                      <div key={h} className="master-slot-row slot-free">
+                      <div key={h} className="master-slot-row slot-booked">
                         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                           <span className="slot-time-badge">{h}</span>
-                          <span className="slot-status-pill free">● Disponible</span>
+                          <div>
+                            <span className="slot-status-pill booked">● Cita Reservada</span>
+                            <b style={{ display: 'block', fontSize: 15, marginTop: 4, color: '#0b1020' }}>{apt.clientName}</b>
+                            <span style={{ fontSize: 12, color: '#64748b' }}>Tel: {apt.clientPhone} · {apt.service?.name}</span>
+                          </div>
                         </div>
-                        <button onClick={() => { setSlotToBlock(h); setBlockModalOpen(true); }} className="btn-action-sm btn-block">
-                          <Lock size={12} style={{ display: 'inline', marginRight: 4 }} /> Bloquear
+                        <button onClick={() => setConfirmModal({ open: true, id: apt.id, name: apt.clientName })} className="btn-action-sm btn-cancel">
+                          Cancelar Cita
                         </button>
                       </div>
                     );
-                  })}
-                </div>
-              )}
+                  }
+
+                  if (vipSlot) {
+                    return (
+                      <div key={h} className="master-slot-row" style={{ borderLeft: '5px solid #d97706', background: '#fffbeb' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                          <span className="slot-time-badge">{h}</span>
+                          <div>
+                            <span className="slot-status-pill" style={{ background: '#fef3c7', color: '#b45309' }}>👑 Turno Fijo VIP Semanal</span>
+                            <b style={{ display: 'block', fontSize: 15, marginTop: 4, color: '#0b1020' }}>{vipSlot.client?.name}</b>
+                            <span style={{ fontSize: 12, color: '#64748b' }}>Tel: {vipSlot.client?.phone} · Turno habitual semanal</span>
+                          </div>
+                        </div>
+                        <button onClick={() => api.delete(`/api/vip/${vipSlot.id}`).then(loadData)} className="btn-action-sm btn-cancel">
+                          Eliminar Turno VIP
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  if (blk) {
+                    return (
+                      <div key={h} className="master-slot-row slot-blocked">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                          <span className="slot-time-badge">{h}</span>
+                          <div>
+                            <span className="slot-status-pill blocked">🔒 Bloqueada por ti</span>
+                            <span style={{ display: 'block', fontSize: 12, color: '#64748b', marginTop: 2 }}>Motivo: {blk.reason}</span>
+                          </div>
+                        </div>
+                        <button onClick={() => handleUnblock(blk.id)} className="btn-action-sm btn-unblock">
+                          <Unlock size={12} style={{ display: 'inline', marginRight: 4 }} /> Liberar Hora
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={h} className="master-slot-row slot-free">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        <span className="slot-time-badge">{h}</span>
+                        <span className="slot-status-pill free">● Disponible</span>
+                      </div>
+                      <button onClick={() => { setSlotToBlock(h); setBlockModalOpen(true); }} className="btn-action-sm btn-block">
+                        <Lock size={12} style={{ display: 'inline', marginRight: 4 }} /> Bloquear
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
-          {/* PESTAÑA VIPs */}
+          {/* PESTAÑA 2: VIPs */}
           {activeTab === 'vips' && (
             <div className="client-calendar-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -413,7 +453,7 @@ export default function BarberDashboard() {
                           <span className="vip-badge-blue">VIP FIJO</span>
                         </div>
                         <span style={{ fontSize: 13, color: '#64748b', display: 'block', marginTop: 3 }}>
-                          📱 {v.client?.phone} · Día {['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'][v.weekday]} a las {v.time} (Semanal)
+                          📱 {v.client?.phone} · Día {dayNames[v.weekday]} a las {v.time} (Semanal)
                         </span>
                       </div>
                       <button onClick={() => api.delete(`/api/vip/${v.id}`).then(loadData)} className="btn-action-sm btn-cancel">
@@ -426,57 +466,223 @@ export default function BarberDashboard() {
             </div>
           )}
 
-          {/* PESTAÑA 3: MIS CLIENTES CON WHATSAPP */}
+          {/* PESTAÑA 3: MIS CLIENTES CON DISEÑO PREMIUM */}
           {activeTab === 'clients' && (
-            <div className="client-calendar-card">
-              <span className="cal-eyebrow">DIRECTORIO</span>
-              <h2 style={{ fontFamily: 'Sora', fontSize: 22, marginBottom: 20 }}>Clientes de la Barbería</h2>
+            <div className="table-card-saas">
+              <div className="table-saas-header">
+                <div>
+                  <span className="cal-eyebrow">DIRECTORIO DE CLIENTES</span>
+                  <h2 style={{ fontFamily: 'Sora', fontSize: 22, marginTop: 4 }}>Clientes de la Barbería</h2>
+                </div>
+                <span style={{ fontSize: 13, color: '#64748b', fontWeight: 600 }}>Total: {clientList.length} registrados</span>
+              </div>
 
-              <table className="super-table">
-                <thead>
-                  <tr>
-                    <th>Cliente</th>
-                    <th>Celular</th>
-                    <th>Citas Realizadas</th>
-                    <th>Tipo</th>
-                    <th>Chat Directo</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {clientList.length === 0 ? (
-                    <tr><td colSpan={5} style={{ textAlign: 'center', padding: 30, color: '#64748b' }}>No hay clientes registrados aún.</td></tr>
-                  ) : (
-                    clientList.map(c => {
-                      const cleanPhone = c.phone?.replace(/[^0-9]/g, '');
-                      const fullPhone = cleanPhone?.startsWith('57') ? cleanPhone : `57${cleanPhone}`;
-                      const waUrl = `https://wa.me/${fullPhone}?text=${encodeURIComponent(`Hola ${c.name}, te escribimos de ${currentUser?.name || 'la barbería'}`)}`;
-                      const isVip = c.vipSchedules?.length > 0;
+              <div style={{ overflowX: 'auto' }}>
+                <table className="table-saas">
+                  <thead>
+                    <tr>
+                      <th>Cliente</th>
+                      <th>Celular (WhatsApp)</th>
+                      <th>Citas Acumuladas</th>
+                      <th>Estado</th>
+                      <th style={{ textAlign: 'right' }}>Contacto Directo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {clientList.length === 0 ? (
+                      <tr><td colSpan={5} style={{ textAlign: 'center', padding: 36, color: '#64748b' }}>No hay clientes registrados aún.</td></tr>
+                    ) : (
+                      clientList.map(c => {
+                        const cleanPhone = c.phone?.replace(/[^0-9]/g, '');
+                        const fullPhone = cleanPhone?.startsWith('57') ? cleanPhone : `57${cleanPhone}`;
+                        const waUrl = `https://wa.me/${fullPhone}?text=${encodeURIComponent(`Hola ${c.name}, te escribimos de ASYS Barber.`)}`;
+                        const isVip = c.vipSchedules?.length > 0;
 
-                      return (
-                        <tr key={c.id}>
-                          <td><b>{c.name}</b></td>
-                          <td>{c.phone}</td>
-                          <td><b>{c._count?.appointments || 0} cita(s)</b></td>
-                          <td>
-                            {isVip ? (
-                              <span style={{ color: '#d97706', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                <Crown size={14} color="#f59e0b" /> VIP
+                        return (
+                          <tr key={c.id}>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <div className="client-avatar-circle">{c.name.slice(0, 2).toUpperCase()}</div>
+                                <b style={{ color: '#0b1020', fontSize: 15 }}>{c.name}</b>
+                              </div>
+                            </td>
+                            <td style={{ fontFamily: 'Sora', fontWeight: 600, color: '#334155' }}>
+                              {c.phone}
+                            </td>
+                            <td>
+                              <span style={{ background: '#f1f5f9', padding: '4px 10px', borderRadius: 12, fontWeight: 700, fontSize: 12 }}>
+                                {c._count?.appointments || 0} cita(s)
                               </span>
-                            ) : (
-                              <span style={{ color: '#64748b' }}>Cliente Regular</span>
-                            )}
-                          </td>
-                          <td>
-                            <a href={waUrl} target="_blank" rel="noopener noreferrer" className="btn-whatsapp-chat">
-                              <MessageSquare size={13} /> Enviar WhatsApp
-                            </a>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+                            </td>
+                            <td>
+                              {isVip ? (
+                                <span style={{ color: '#d97706', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 4, background: '#fffbeb', border: '1px solid #fde68a', padding: '3px 10px', borderRadius: 14, fontSize: 11 }}>
+                                  <Crown size={12} color="#f59e0b" /> VIP
+                                </span>
+                              ) : (
+                                <span style={{ color: '#64748b', fontSize: 12, fontWeight: 600 }}>Regular</span>
+                              )}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              <a href={waUrl} target="_blank" rel="noopener noreferrer" className="btn-whatsapp-chat">
+                                <MessageSquare size={13} /> Enviar WhatsApp
+                              </a>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* PESTAÑA 4: CONFIGURACIÓN DE HORARIOS SEMANALES Y PRECIOS */}
+          {activeTab === 'settings' && (
+            <div>
+              {/* Horarios semanales por día */}
+              <div className="client-calendar-card" style={{ marginBottom: 24 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                  <div>
+                    <span className="cal-eyebrow">JORNADA SEMANAL</span>
+                    <h2 style={{ fontFamily: 'Sora', fontSize: 22 }}>Horarios de Apertura por Día</h2>
+                    <p style={{ color: '#64748b', fontSize: 13, marginTop: 4 }}>
+                      Configura qué días abres tu barbería de forma fija y en qué horario.
+                    </p>
+                  </div>
+                  <button onClick={handleSaveSchedules} className="btn-clean-submit" style={{ width: 'auto', padding: '10px 22px' }}>
+                    <Save size={15} style={{ display: 'inline', marginRight: 6 }} /> Guardar Horarios
+                  </button>
+                </div>
+
+                {saveSettingsSuccess && (
+                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#16a34a', padding: '10px 16px', borderRadius: 10, fontSize: 13, fontWeight: 700, marginBottom: 16 }}>
+                    ✓ ¡Horarios de apertura guardados con éxito en la base de datos!
+                  </div>
+                )}
+
+                <div>
+                  {weeklySchedules.map((s, idx) => (
+                    <div key={s.weekday} className={`schedule-day-row ${s.closed ? 'day-closed' : ''}`}>
+                      <div style={{ width: 140 }}>
+                        <b style={{ fontSize: 16, display: 'block' }}>{dayNames[s.weekday]}</b>
+                        <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginTop: 4 }}>
+                          <input
+                            type="checkbox"
+                            checked={!s.closed}
+                            onChange={e => {
+                              const copy = [...weeklySchedules];
+                              copy[idx].closed = !e.target.checked;
+                              setWeeklySchedules(copy);
+                            }}
+                          />
+                          <span style={{ color: !s.closed ? '#16a34a' : '#dc2626', fontWeight: 700 }}>
+                            {!s.closed ? 'Laborable' : 'Cerrado / Descanso'}
+                          </span>
+                        </label>
+                      </div>
+
+                      {!s.closed ? (
+                        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+                          <div>
+                            <span style={{ fontSize: 11, color: '#64748b', display: 'block' }}>Apertura</span>
+                            <select
+                              value={s.openTime}
+                              onChange={e => {
+                                const copy = [...weeklySchedules];
+                                copy[idx].openTime = e.target.value;
+                                setWeeklySchedules(copy);
+                              }}
+                              className="clean-input"
+                              style={{ padding: '6px 10px', fontSize: 13, width: 100 }}
+                            >
+                              {masterHours.map(h => <option key={h} value={h}>{h}</option>)}
+                            </select>
+                          </div>
+
+                          <span style={{ marginTop: 16, color: '#94a3b8' }}>a</span>
+
+                          <div>
+                            <span style={{ fontSize: 11, color: '#64748b', display: 'block' }}>Cierre</span>
+                            <select
+                              value={s.closeTime}
+                              onChange={e => {
+                                const copy = [...weeklySchedules];
+                                copy[idx].closeTime = e.target.value;
+                                setWeeklySchedules(copy);
+                              }}
+                              className="clean-input"
+                              style={{ padding: '6px 10px', fontSize: 13, width: 100 }}
+                            >
+                              {masterHours.map(h => <option key={h} value={h}>{h}</option>)}
+                            </select>
+                          </div>
+                        </div>
+                      ) : (
+                        <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: 13 }}>
+                          Este día no se ofrecerán turnos a clientes.
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Precios y duración de servicios */}
+              <div className="client-calendar-card">
+                <span className="cal-eyebrow">CATÁLOGO Y TARIFAS</span>
+                <h2 style={{ fontFamily: 'Sora', fontSize: 22, marginBottom: 8 }}>Precios de Servicios e Intervalos</h2>
+                <p style={{ color: '#64748b', fontSize: 13, marginBottom: 20 }}>
+                  Cambia el valor de tus cortes o la duración de cada turno (30 min, 45 min o 60 min).
+                </p>
+
+                {services.map(svc => (
+                  <div key={svc.id} className="service-edit-card">
+                    <div>
+                      <b style={{ fontSize: 15, display: 'block' }}>{svc.name}</b>
+                      <small style={{ color: '#64748b' }}>Servicio activo para agendamiento</small>
+                    </div>
+
+                    <div>
+                      <span style={{ fontSize: 11, color: '#64748b', display: 'block' }}>Precio (COP)</span>
+                      <input
+                        type="number"
+                        defaultValue={svc.price}
+                        id={`price-${svc.id}`}
+                        className="clean-input"
+                        style={{ padding: '8px 10px', fontSize: 14 }}
+                      />
+                    </div>
+
+                    <div>
+                      <span style={{ fontSize: 11, color: '#64748b', display: 'block' }}>Duración / Intervalo</span>
+                      <select
+                        defaultValue={svc.durationMinutes}
+                        id={`dur-${svc.id}`}
+                        className="clean-input"
+                        style={{ padding: '8px 10px', fontSize: 13 }}
+                      >
+                        <option value={30}>30 Minutos</option>
+                        <option value={45}>45 Minutos</option>
+                        <option value={60}>60 Minutos (1 Hora)</option>
+                      </select>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        const newPrice = Number((document.getElementById(`price-${svc.id}`) as HTMLInputElement).value);
+                        const newDur = Number((document.getElementById(`dur-${svc.id}`) as HTMLSelectElement).value);
+                        handleUpdateServicePrice(svc.id, newPrice, newDur);
+                      }}
+                      className="btn-action-sm btn-unblock"
+                      style={{ padding: '10px 16px', height: 'fit-content' }}
+                    >
+                      Actualizar Tarifa
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
