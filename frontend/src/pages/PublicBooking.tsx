@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { X, CheckCircle2, LogOut, Crown, Calendar as CalIcon, RefreshCw } from 'lucide-react';
+import { X, CheckCircle2, LogOut, Crown, AlertCircle, RefreshCw, Sparkles } from 'lucide-react';
 import { api } from '../api';
 
 export default function PublicBooking() {
@@ -18,19 +18,29 @@ export default function PublicBooking() {
   const [showHoursModal, setShowHoursModal] = useState(false);
   const [freeHours, setFreeHours] = useState<string[]>([]);
   const [loadingHours, setLoadingHours] = useState(false);
-  const [confirmSuccess, setConfirmSuccess] = useState(false);
 
-  // Modal para VIP cambiar turno esta semana
-  const [vipRescheduleModal, setVipRescheduleModal] = useState(false);
+  // Horario VIP dinámico y real
+  const [myVipData, setMyVipData] = useState<any>(null);
+  const [showVipModal, setShowVipModal] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [rescheduleTime, setRescheduleTime] = useState('11:00');
 
-  // Sesión y Datos Reales del Cliente
+  // Ventana de Alerta ASYS (Sustituye alert() del navegador)
+  const [alertModal, setAlertModal] = useState<{ open: boolean; title: string; message: string; type: 'info' | 'success' | 'error' } | null>(null);
+
   const token = localStorage.getItem('asys_token');
   const userStr = localStorage.getItem('asys_user');
   const currentUser = userStr ? JSON.parse(userStr) : null;
 
   const masterDayHours = ['09:00', '10:00', '11:00', '12:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
+  const weekdayNames = ['Domingos', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábados'];
+
+  const showAlert = (title: string, message: string, type: 'info' | 'success' | 'error' = 'info') => {
+    setAlertModal({ open: true, title, message, type });
+  };
 
   useEffect(() => {
+    // 1. Cargar datos de la barbería
     api.get(`/api/public/${slug}`)
       .then(data => {
         setOrg(data);
@@ -39,31 +49,44 @@ export default function PublicBooking() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [slug]);
 
-  // CÁLCULO EXACTO DEL CALENDARIO (DOMINGO A SÁBADO)
+    // 2. Si está logueado, consultar su horario VIP real en la BD
+    if (token) {
+      api.get('/api/vip/my-schedule')
+        .then(vip => setMyVipData(vip))
+        .catch(() => setMyVipData(null));
+    }
+  }, [slug, token]);
+
+  // CALENDARIO DOMINGO A SÁBADO CON DÍAS REALMENTE CERRADOS
   const today = new Date();
   const year = today.getFullYear();
   const month = today.getMonth();
-  
-  // Día de la semana en que inicia el mes (0: Domingo, 1: Lunes, 2: Martes, etc.)
   const firstDayIndex = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-  // Días vacíos al inicio para alinear con el encabezado DOM, LUN, MAR...
   const emptyPaddingDays = Array.from({ length: firstDayIndex }, (_, i) => i);
 
   const currentMonthDays = Array.from({ length: daysInMonth }, (_, i) => {
     const d = new Date(year, month, i + 1);
+    const dateStr = d.toISOString().split('T')[0];
     const diffDays = Math.floor((d.getTime() - new Date(today.toDateString()).getTime()) / (1000 * 60 * 60 * 24));
     const inRange = diffDays >= 0 && diffDays <= 7;
     const isSunday = d.getDay() === 0;
 
+    // Verificar si el día está bloqueado por el barbero en la base de datos
+    const isDayClosedInDb = org?.blockedSlots?.some((b: any) => {
+      const bStart = new Date(b.startsAt);
+      const bEnd = new Date(b.endsAt);
+      return bStart <= new Date(`${dateStr}T00:00:00-05:00`) && bEnd >= new Date(`${dateStr}T23:59:59-05:00`);
+    });
+
     return {
       dayNum: i + 1,
-      dateStr: d.toISOString().split('T')[0],
-      inRange: inRange && !isSunday,
-      isSunday
+      dateStr,
+      inRange: inRange && !isSunday && !isDayClosedInDb,
+      isSunday,
+      isDayClosedInDb
     };
   });
 
@@ -79,7 +102,7 @@ export default function PublicBooking() {
       if (res.isClosed) {
         setFreeHours([]);
       } else {
-        const serverTimes = res.map((item: any) => item.time);
+        const serverTimes = res.data?.map((item: any) => item.time) || res.map((item: any) => item.time) || [];
         setFreeHours(serverTimes);
       }
     } catch {
@@ -96,7 +119,7 @@ export default function PublicBooking() {
 
   const handleConfirmAppointment = async () => {
     if (!token) {
-      alert('Debes iniciar sesión con tu cuenta para confirmar tu cita.');
+      showAlert('Acceso Requerido', 'Por favor inicia sesión con tu celular para registrar tu turno.', 'info');
       navigate('/login');
       return;
     }
@@ -108,9 +131,39 @@ export default function PublicBooking() {
         barberId: selectedBarber || undefined,
         startsAt
       });
-      setConfirmSuccess(true);
+      showAlert('¡Cita Confirmada!', `Tu turno quedó reservado para el ${selectedDate} a las ${selectedTime}.`, 'success');
     } catch (err: any) {
-      alert(err.message || 'Error al confirmar la cita');
+      showAlert('No se pudo agendar', err.message || 'Error al confirmar la cita', 'error');
+    }
+  };
+
+  // REPROGRAMAR TURNO VIP SOLO POR ESTA SEMANA
+  const handleConfirmVipReschedule = async () => {
+    if (!rescheduleDate || !rescheduleTime) {
+      return showAlert('Campos requeridos', 'Selecciona el nuevo día y la hora para mover tu turno.', 'error');
+    }
+
+    try {
+      // Calcular fecha original del sábado/día VIP de esta semana
+      const origDate = new Date();
+      origDate.setDate(origDate.getDate() + ((myVipData.weekday + 7 - origDate.getDay()) % 7));
+      const originalDateStr = origDate.toISOString().split('T')[0];
+
+      await api.post('/api/vip/reschedule-week', {
+        vipId: myVipData.id,
+        originalDateStr,
+        newDateStr: rescheduleDate,
+        newTime: rescheduleTime
+      });
+
+      setShowVipModal(false);
+      showAlert(
+        '¡Turno VIP Reprogramado!',
+        `Tu hora habitual del ${weekdayNames[myVipData.weekday]} ha sido liberada para esta semana y tu nuevo turno quedó para el ${rescheduleDate} a las ${rescheduleTime}.`,
+        'success'
+      );
+    } catch (err: any) {
+      showAlert('Error al reprogramar', err.message || 'No se pudo mover el turno VIP', 'error');
     }
   };
 
@@ -126,7 +179,7 @@ export default function PublicBooking() {
   return (
     <div className="client-page-wrap">
       
-      {/* 1. ENCABEZADO SUPERIOR CON SALUDO Y CORONA VIP */}
+      {/* 1. ENCABEZADO */}
       <header className="client-top-bar">
         <div className="client-brand-area">
           <div className="barber-logo-placeholder">
@@ -136,9 +189,9 @@ export default function PublicBooking() {
             <b>{org.name}</b>
             <span>
               {currentUser ? (
-                currentUser.isVip ? (
-                  <span style={{ color: '#d97706', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                    <Crown size={14} color="#f59e0b" /> Bienvenido, {currentUser.name} (Cliente VIP)
+                myVipData ? (
+                  <span style={{ color: '#d97706', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <Crown size={15} color="#f59e0b" /> {currentUser.name} (Cliente VIP)
                   </span>
                 ) : (
                   `👋 Bienvenido, ${currentUser.name}`
@@ -163,29 +216,29 @@ export default function PublicBooking() {
         </div>
       </header>
 
-      {/* 2. CUERPO PRINCIPAL */}
+      {/* 2. CONTENIDO */}
       <div className="client-content-container">
         
-        {/* BANNER ESPECIAL SI ES CLIENTE VIP */}
-        {currentUser?.isVip && (
-          <div style={{ background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: 16, padding: '16px 22px', marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 42, height: 42, borderRadius: '50%', background: '#fef3c7', display: 'grid', placeItems: 'center' }}>
-                <Crown size={22} color="#d97706" />
+        {/* BANNER VIP DINÁMICO (Muestra la hora real de este VIP) */}
+        {myVipData && (
+          <div style={{ background: '#fffdf5', border: '1.5px solid #fde68a', borderRadius: 18, padding: '18px 24px', marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, boxShadow: '0 4px 15px rgba(217, 119, 6, 0.06)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#fef3c7', display: 'grid', placeItems: 'center' }}>
+                <Crown size={24} color="#d97706" />
               </div>
               <div>
-                <b style={{ color: '#92400e', fontSize: 15, display: 'block' }}>Tu Turno Fijo VIP Semanal está Asegurado</b>
+                <b style={{ color: '#92400e', fontSize: 16, display: 'block' }}>Tu Turno Fijo VIP Semanal está Asegurado</b>
                 <span style={{ color: '#b45309', fontSize: 13 }}>
-                  Tienes reservado todos los sábados a las 11:00 AM. Puedes agendar hasta 2 citas adicionales esta semana.
+                  Tienes reservado todos los <b>{weekdayNames[myVipData.weekday]} a las {myVipData.time}</b>. Tienes hasta 2 citas adicionales esta semana.
                 </span>
               </div>
             </div>
+
             <button
-              onClick={() => setVipRescheduleModal(true)}
-              className="btn-dark"
-              style={{ background: '#ffffff', borderColor: '#fcd34d', color: '#b45309' }}
+              onClick={() => setShowVipModal(true)}
+              className="btn-vip-reschedule"
             >
-              <RefreshCw size={14} /> Cambiar Turno Esta Semana
+              <RefreshCw size={15} /> Cambiar Turno Esta Semana
             </button>
           </div>
         )}
@@ -217,7 +270,7 @@ export default function PublicBooking() {
 
         <div className="client-grid">
           
-          {/* Calendario con Domingo a Sábado y Días Vacíos al inicio */}
+          {/* Calendario con DOMINGO a SÁBADO */}
           <div className="client-calendar-card">
             <div className="cal-header-bar">
               <div>
@@ -232,30 +285,33 @@ export default function PublicBooking() {
             </div>
 
             <div className="cal-days-grid">
-              {/* 1. Celdas vacías de compensación para alinear el día 1 en Martes */}
               {emptyPaddingDays.map((_, i) => (
                 <div key={`empty-${i}`} className="cal-cell cell-disabled" style={{ opacity: 0.15 }}></div>
               ))}
 
-              {/* 2. Días reales del mes */}
-              {currentMonthDays.map((d, index) => (
-                <div
-                  key={index}
-                  onClick={() => handleDaySelect(d)}
-                  className={`cal-cell ${!d.inRange ? 'cell-disabled' : 'status-green'} ${selectedDate === d.dateStr ? 'cell-selected' : ''}`}
-                >
-                  <div className="cal-cell-num">{d.dayNum}</div>
-                  <div className="cal-cell-status">
-                    {d.isSunday ? (
-                      <span style={{ color: '#94a3b8' }}>Cerrado</span>
-                    ) : !d.inRange ? (
-                      <span style={{ color: '#94a3b8' }}>Inactivo</span>
-                    ) : (
-                      <span>● Libre</span>
-                    )}
+              {currentMonthDays.map((d, index) => {
+                const isSelected = selectedDate === d.dateStr;
+                const isClosed = d.isSunday || d.isDayClosedInDb;
+
+                return (
+                  <div
+                    key={index}
+                    onClick={() => handleDaySelect(d)}
+                    className={`cal-cell ${isClosed ? 'status-red' : !d.inRange ? 'cell-disabled' : 'status-green'} ${isSelected ? 'cell-selected' : ''}`}
+                  >
+                    <div className="cal-cell-num">{d.dayNum}</div>
+                    <div className="cal-cell-status">
+                      {isClosed ? (
+                        <span style={{ color: '#dc2626' }}>Cerrado</span>
+                      ) : !d.inRange ? (
+                        <span style={{ color: '#94a3b8' }}>Inactivo</span>
+                      ) : (
+                        <span>● Libre</span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -352,45 +408,70 @@ export default function PublicBooking() {
         </div>
       )}
 
-      {/* MODAL DE CITA CONFIRMADA */}
-      {confirmSuccess && (
+      {/* MODAL DE REPROGRAMAR TURNO VIP ESTA SEMANA */}
+      {showVipModal && (
         <div className="modal-hours-overlay">
-          <div className="modal-hours-box" style={{ textAlign: 'center', maxWidth: 420 }}>
-            <CheckCircle2 size={50} color="#10b981" style={{ margin: '0 auto 12px' }} />
-            <h3 style={{ fontSize: 20, fontFamily: 'Sora', marginBottom: 6 }}>¡Cita Confirmada!</h3>
-            <p style={{ color: '#64748b', fontSize: 13, lineHeight: 1.6 }}>
-              Tu turno quedó reservado para el <b>{selectedDate}</b> a las <b>{selectedTime}</b> en <b>{org.name}</b>.
+          <div className="modal-hours-box" style={{ maxWidth: 460 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ fontFamily: 'Sora', fontSize: 18, color: '#92400e', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Crown size={20} color="#d97706" /> Mover Turno VIP Esta Semana
+              </h3>
+              <button onClick={() => setShowVipModal(false)} className="btn-logout-modern" style={{ padding: '4px 8px' }}><X size={16} /></button>
+            </div>
+
+            <p style={{ color: '#64748b', fontSize: 13, lineHeight: 1.5, marginBottom: 18 }}>
+              Al mover tu turno, tu horario habitual del <b>{weekdayNames[myVipData?.weekday]} a las {myVipData?.time}</b> se liberará solo para esta semana, y quedarás agendado en la nueva fecha que elijas.
             </p>
-            <button
-              onClick={() => { setConfirmSuccess(false); window.location.reload(); }}
-              className="btn-clean-submit"
-              style={{ marginTop: 18 }}
+
+            <label className="input-label">Selecciona la Nueva Fecha</label>
+            <input
+              type="date"
+              value={rescheduleDate}
+              onChange={e => setRescheduleDate(e.target.value)}
+              className="clean-input"
+              style={{ marginBottom: 14 }}
+            />
+
+            <label className="input-label">Selecciona la Nueva Hora</label>
+            <select
+              value={rescheduleTime}
+              onChange={e => setRescheduleTime(e.target.value)}
+              className="clean-input"
+              style={{ marginBottom: 22 }}
             >
-              Aceptar
+              {masterDayHours.map(h => (
+                <option key={h} value={h}>{h}</option>
+              ))}
+            </select>
+
+            <button onClick={handleConfirmVipReschedule} className="btn-vip-reschedule" style={{ width: '100%', justifyContent: 'center' }}>
+              Confirmar Cambio de Turno VIP
             </button>
           </div>
         </div>
       )}
 
-      {/* MODAL REPROGRAMAR TURNO VIP ESTA SEMANA */}
-      {vipRescheduleModal && (
+      {/* MODAL DE ALERTAS FLOTANTES ASYS (Cero popups nativos) */}
+      {alertModal && alertModal.open && (
         <div className="modal-hours-overlay">
-          <div className="modal-hours-box" style={{ maxWidth: 440 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <h3 style={{ fontFamily: 'Sora', fontSize: 18 }}>Cambiar Turno VIP Esta Semana</h3>
-              <button onClick={() => setVipRescheduleModal(false)} className="btn-dark" style={{ padding: '4px 8px' }}><X size={16} /></button>
+          <div className="asys-alert-modal">
+            <div className={`asys-alert-icon ${alertModal.type}`}>
+              {alertModal.type === 'success' && <CheckCircle2 size={32} />}
+              {alertModal.type === 'error' && <AlertCircle size={32} />}
+              {alertModal.type === 'info' && <Sparkles size={32} />}
             </div>
-            <p style={{ color: '#64748b', fontSize: 13, marginBottom: 16 }}>
-              Si esta semana no puedes asistir el sábado a las 11:00 AM, selecciona una nueva hora libre para mover tu turno únicamente por estos 7 días.
+            <h3 style={{ fontFamily: 'Sora', fontSize: 20, marginBottom: 8, color: '#0b1020' }}>{alertModal.title}</h3>
+            <p style={{ color: '#64748b', fontSize: 14, lineHeight: 1.5, marginBottom: 22 }}>
+              {alertModal.message}
             </p>
             <button
               onClick={() => {
-                alert('Selecciona el nuevo día y hora en el calendario para reubicar tu turno.');
-                setVipRescheduleModal(false);
+                setAlertModal(null);
+                if (alertModal.type === 'success') window.location.reload();
               }}
               className="btn-clean-submit"
             >
-              Elegir Nueva Fecha
+              Aceptar
             </button>
           </div>
         </div>
