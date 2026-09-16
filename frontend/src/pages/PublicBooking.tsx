@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { X, CheckCircle2, LogOut, Crown } from 'lucide-react';
+import { X, CheckCircle2, LogOut, Crown, Calendar as CalIcon, RefreshCw } from 'lucide-react';
 import { api } from '../api';
 
 export default function PublicBooking() {
@@ -20,6 +20,9 @@ export default function PublicBooking() {
   const [loadingHours, setLoadingHours] = useState(false);
   const [confirmSuccess, setConfirmSuccess] = useState(false);
 
+  // Modal para VIP cambiar turno esta semana
+  const [vipRescheduleModal, setVipRescheduleModal] = useState(false);
+
   // Sesión y Datos Reales del Cliente
   const token = localStorage.getItem('asys_token');
   const userStr = localStorage.getItem('asys_user');
@@ -38,10 +41,20 @@ export default function PublicBooking() {
       .catch(() => setLoading(false));
   }, [slug]);
 
-  // Días habilitados (7 días hábiles)
+  // CÁLCULO EXACTO DEL CALENDARIO (DOMINGO A SÁBADO)
   const today = new Date();
-  const currentMonthDays = Array.from({ length: 30 }, (_, i) => {
-    const d = new Date(today.getFullYear(), today.getMonth(), i + 1);
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  
+  // Día de la semana en que inicia el mes (0: Domingo, 1: Lunes, 2: Martes, etc.)
+  const firstDayIndex = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  // Días vacíos al inicio para alinear con el encabezado DOM, LUN, MAR...
+  const emptyPaddingDays = Array.from({ length: firstDayIndex }, (_, i) => i);
+
+  const currentMonthDays = Array.from({ length: daysInMonth }, (_, i) => {
+    const d = new Date(year, month, i + 1);
     const diffDays = Math.floor((d.getTime() - new Date(today.toDateString()).getTime()) / (1000 * 60 * 60 * 24));
     const inRange = diffDays >= 0 && diffDays <= 7;
     const isSunday = d.getDay() === 0;
@@ -62,9 +75,13 @@ export default function PublicBooking() {
     setShowHoursModal(true);
 
     try {
-      const data = await api.get(`/api/public/${slug}/availability?date=${day.dateStr}`);
-      const serverTimes = data.map((item: any) => item.time);
-      setFreeHours(serverTimes);
+      const res = await api.get(`/api/public/${slug}/availability?date=${day.dateStr}`);
+      if (res.isClosed) {
+        setFreeHours([]);
+      } else {
+        const serverTimes = res.map((item: any) => item.time);
+        setFreeHours(serverTimes);
+      }
     } catch {
       setFreeHours(masterDayHours);
     } finally {
@@ -109,7 +126,7 @@ export default function PublicBooking() {
   return (
     <div className="client-page-wrap">
       
-      {/* 1. ENCABEZADO SUPERIOR CON SALUDO REAL Y BADGE VIP */}
+      {/* 1. ENCABEZADO SUPERIOR CON SALUDO Y CORONA VIP */}
       <header className="client-top-bar">
         <div className="client-brand-area">
           <div className="barber-logo-placeholder">
@@ -149,6 +166,30 @@ export default function PublicBooking() {
       {/* 2. CUERPO PRINCIPAL */}
       <div className="client-content-container">
         
+        {/* BANNER ESPECIAL SI ES CLIENTE VIP */}
+        {currentUser?.isVip && (
+          <div style={{ background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: 16, padding: '16px 22px', marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 42, height: 42, borderRadius: '50%', background: '#fef3c7', display: 'grid', placeItems: 'center' }}>
+                <Crown size={22} color="#d97706" />
+              </div>
+              <div>
+                <b style={{ color: '#92400e', fontSize: 15, display: 'block' }}>Tu Turno Fijo VIP Semanal está Asegurado</b>
+                <span style={{ color: '#b45309', fontSize: 13 }}>
+                  Tienes reservado todos los sábados a las 11:00 AM. Puedes agendar hasta 2 citas adicionales esta semana.
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => setVipRescheduleModal(true)}
+              className="btn-dark"
+              style={{ background: '#ffffff', borderColor: '#fcd34d', color: '#b45309' }}
+            >
+              <RefreshCw size={14} /> Cambiar Turno Esta Semana
+            </button>
+          </div>
+        )}
+
         {/* Selector de Servicios */}
         {org.services?.length > 1 && (
           <div style={{ display: 'flex', gap: 8, marginBottom: 20, overflowX: 'auto', paddingBottom: 6 }}>
@@ -176,7 +217,7 @@ export default function PublicBooking() {
 
         <div className="client-grid">
           
-          {/* Calendario */}
+          {/* Calendario con Domingo a Sábado y Días Vacíos al inicio */}
           <div className="client-calendar-card">
             <div className="cal-header-bar">
               <div>
@@ -191,6 +232,12 @@ export default function PublicBooking() {
             </div>
 
             <div className="cal-days-grid">
+              {/* 1. Celdas vacías de compensación para alinear el día 1 en Martes */}
+              {emptyPaddingDays.map((_, i) => (
+                <div key={`empty-${i}`} className="cal-cell cell-disabled" style={{ opacity: 0.15 }}></div>
+              ))}
+
+              {/* 2. Días reales del mes */}
               {currentMonthDays.map((d, index) => (
                 <div
                   key={index}
@@ -259,7 +306,7 @@ export default function PublicBooking() {
         </div>
       </div>
 
-      {/* MODAL DE HORARIOS FLOTANTE ARRIBA */}
+      {/* MODAL FLOTANTE DE HORAS DISPONIBLES */}
       {showHoursModal && (
         <div className="modal-hours-overlay">
           <div className="modal-hours-box">
@@ -280,6 +327,10 @@ export default function PublicBooking() {
 
             {loadingHours ? (
               <div style={{ padding: 30, textAlign: 'center', color: '#64748b' }}>Consultando turnos...</div>
+            ) : freeHours.length === 0 ? (
+              <div style={{ padding: 40, textAlign: 'center', color: '#ef4444', fontWeight: 700 }}>
+                Este día se encuentra cerrado o totalmente lleno.
+              </div>
             ) : (
               <div className="modal-hours-grid">
                 {masterDayHours.map((hour) => {
@@ -301,7 +352,7 @@ export default function PublicBooking() {
         </div>
       )}
 
-      {/* MODAL CONFIRMACIÓN ÉXITO */}
+      {/* MODAL DE CITA CONFIRMADA */}
       {confirmSuccess && (
         <div className="modal-hours-overlay">
           <div className="modal-hours-box" style={{ textAlign: 'center', maxWidth: 420 }}>
@@ -316,6 +367,30 @@ export default function PublicBooking() {
               style={{ marginTop: 18 }}
             >
               Aceptar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL REPROGRAMAR TURNO VIP ESTA SEMANA */}
+      {vipRescheduleModal && (
+        <div className="modal-hours-overlay">
+          <div className="modal-hours-box" style={{ maxWidth: 440 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <h3 style={{ fontFamily: 'Sora', fontSize: 18 }}>Cambiar Turno VIP Esta Semana</h3>
+              <button onClick={() => setVipRescheduleModal(false)} className="btn-dark" style={{ padding: '4px 8px' }}><X size={16} /></button>
+            </div>
+            <p style={{ color: '#64748b', fontSize: 13, marginBottom: 16 }}>
+              Si esta semana no puedes asistir el sábado a las 11:00 AM, selecciona una nueva hora libre para mover tu turno únicamente por estos 7 días.
+            </p>
+            <button
+              onClick={() => {
+                alert('Selecciona el nuevo día y hora en el calendario para reubicar tu turno.');
+                setVipRescheduleModal(false);
+              }}
+              className="btn-clean-submit"
+            >
+              Elegir Nueva Fecha
             </button>
           </div>
         </div>
