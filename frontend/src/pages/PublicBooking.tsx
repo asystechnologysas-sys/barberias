@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { X, CheckCircle2, LogOut, Crown, AlertCircle, RefreshCw, Sparkles, Calendar as CalIcon } from 'lucide-react';
+import { X, CheckCircle2, LogOut } from 'lucide-react';
 import { api } from '../api';
 
 export default function PublicBooking() {
@@ -18,30 +18,19 @@ export default function PublicBooking() {
   const [showHoursModal, setShowHoursModal] = useState(false);
   const [freeHours, setFreeHours] = useState<string[]>([]);
   const [loadingHours, setLoadingHours] = useState(false);
+  const [confirmSuccess, setConfirmSuccess] = useState(false);
 
-  // Citas futuras del cliente
-  const [myUpcomingAppointments, setMyUpcomingAppointments] = useState<any[]>([]);
-
-  // Modo reprogramación VIP sobre el almanaque
-  const [isReschedulingVip, setIsReschedulingVip] = useState(false);
-  const [myVipData, setMyVipData] = useState<any>(null);
-
-  // Modal de alertas ASYS (Cero alertas nativas)
-  const [alertModal, setAlertModal] = useState<{ open: boolean; title: string; message: string; type: 'info' | 'success' | 'error' } | null>(null);
+  // Mapa de días llenos: { "2026-09-22": true } significa que ese día está LLENO (Rojo)
+  const [fullDaysMap, setFullDaysMap] = useState<{ [dateStr: string]: boolean }>({});
 
   const token = localStorage.getItem('asys_token');
   const userStr = localStorage.getItem('asys_user');
   const currentUser = userStr ? JSON.parse(userStr) : null;
 
   const masterDayHours = ['09:00', '10:00', '11:00', '12:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
-  const weekdayNames = ['Domingos', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábados'];
 
-  const showAlert = (title: string, message: string, type: 'info' | 'success' | 'error' = 'info') => {
-    setAlertModal({ open: true, title, message, type });
-  };
-
+  // Cargar datos de la barbería
   useEffect(() => {
-    // Cargar barbería
     api.get(`/api/public/${slug}`)
       .then(data => {
         setOrg(data);
@@ -50,51 +39,70 @@ export default function PublicBooking() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
+  }, [slug]);
 
-    // Si está autenticado, cargar su horario VIP real y sus citas futuras
-    if (token) {
-      api.get('/api/vip/my-schedule')
-        .then(vip => setMyVipData(vip))
-        .catch(() => setMyVipData(null));
-
-      api.get('/api/appointments')
-        .then(apts => {
-          const now = new Date();
-          const futures = apts.filter((a: any) => new Date(a.startsAt) >= now && a.status === 'CONFIRMED');
-          setMyUpcomingAppointments(futures);
-        })
-        .catch(() => setMyUpcomingAppointments([]));
-    }
-  }, [slug, token]);
-
-  // CALENDARIO DOMINGO A SÁBADO
+  // Generar días del mes (próximos 7 días habilitados)
   const today = new Date();
   const year = today.getFullYear();
   const month = today.getMonth();
-  const firstDayIndex = new Date(year, month, 1).getDay();
+  const firstDayIndex = new Date(year, month, 1).getDay(); // 0: Dom, 1: Lun...
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
   const emptyPaddingDays = Array.from({ length: firstDayIndex }, (_, i) => i);
 
   const currentMonthDays = Array.from({ length: daysInMonth }, (_, i) => {
     const d = new Date(year, month, i + 1);
-    const dateStr = d.toISOString().split('T')[0];
     const diffDays = Math.floor((d.getTime() - new Date(today.toDateString()).getTime()) / (1000 * 60 * 60 * 24));
     const inRange = diffDays >= 0 && diffDays <= 7;
 
-    const isDayClosedInDb = org?.blockedSlots?.some((b: any) => {
-      const bStart = new Date(b.startsAt);
-      const bEnd = new Date(b.endsAt);
-      return bStart <= new Date(`${dateStr}T00:00:00-05:00`) && bEnd >= new Date(`${dateStr}T23:59:59-05:00`);
-    });
-
     return {
       dayNum: i + 1,
-      dateStr,
-      inRange: inRange && !isDayClosedInDb,
-      isDayClosedInDb
+      dateStr: d.toISOString().split('T')[0],
+      inRange
     };
   });
+
+  // CONSULTAR DISPONIBILIDAD DE LOS 7 DÍAS PARA PINTAR DE ROJO LOS LLENOS
+  useEffect(() => {
+    if (!org) return;
+
+    const checkFullDays = async () => {
+      const activeDays = currentMonthDays.filter(d => d.inRange);
+      const newFullMap: { [key: string]: boolean } = {};
+
+      await Promise.all(
+        activeDays.map(async (d) => {
+          try {
+            const res = await api.get(`/api/public/${slug}/availability?date=${d.dateStr}`);
+            const slots = Array.isArray(res) ? res : (res?.data || []);
+            // Si el backend devuelve 0 horas libres o dice isClosed, ESTÁ LLENO
+            if (res.isClosed || slots.length === 0) {
+              newFullMap[d.dateStr] = true;
+            } else {
+              newFullMap[d.dateStr] = false;
+            }
+          } catch {
+            newFullMap[d.dateStr] = false;
+          }
+        })
+      );
+
+      setFullDaysMap(newFullMap);
+    };
+
+    checkFullDays();
+  }, [org]);
+
+  const normalizeHour = (rawTime: string) => {
+    if (!rawTime) return '';
+    if (rawTime.includes('T')) {
+      const d = new Date(rawTime);
+      const h = String(d.getHours()).padStart(2, '0');
+      const m = String(d.getMinutes()).padStart(2, '0');
+      return `${h}:${m}`;
+    }
+    return rawTime.slice(0, 5);
+  };
 
   const handleDaySelect = async (day: any) => {
     if (!day.inRange) return;
@@ -104,12 +112,14 @@ export default function PublicBooking() {
     setShowHoursModal(true);
 
     try {
-      const res = await api.get(`/api/public/${slug}/availability?date=${day.dateStr}`);
-      if (res.isClosed) {
+      const res = await api.get(`/api/public/${slug}/availability?date=${day.dateStr}&barberId=${selectedBarber || ''}`);
+      const slots = Array.isArray(res) ? res : (res?.data || []);
+      
+      if (res.isClosed || slots.length === 0) {
         setFreeHours([]);
       } else {
-        const serverTimes = res.data?.map((item: any) => item.time) || res.map((item: any) => item.time) || [];
-        setFreeHours(serverTimes);
+        const parsed = slots.map((item: any) => normalizeHour(item.time));
+        setFreeHours(parsed);
       }
     } catch {
       setFreeHours(masterDayHours);
@@ -123,56 +133,23 @@ export default function PublicBooking() {
     setShowHoursModal(false);
   };
 
-  const handleConfirmAction = async () => {
+  const handleConfirmAppointment = async () => {
     if (!token) {
-      showAlert('Acceso Requerido', 'Por favor inicia sesión para registrar tu turno.', 'info');
+      alert('Debes iniciar sesión con tu cuenta para confirmar tu cita.');
       navigate('/login');
       return;
     }
 
-    if (isReschedulingVip) {
-      try {
-        const origDate = new Date();
-        origDate.setDate(origDate.getDate() + ((myVipData.weekday + 7 - origDate.getDay()) % 7));
-        const originalDateStr = origDate.toISOString().split('T')[0];
-
-        await api.post('/api/vip/reschedule-week', {
-          vipId: myVipData.id,
-          originalDateStr,
-          newDateStr: selectedDate,
-          newTime: selectedTime
-        });
-
-        setIsReschedulingVip(false);
-        showAlert(
-          '¡Turno VIP Modificado!',
-          `Tu turno habitual del ${weekdayNames[myVipData.weekday]} ha sido liberado para esta semana. Tu nuevo turno es el ${selectedDate} a las ${selectedTime}.`,
-          'success'
-        );
-      } catch (err: any) {
-        showAlert('Error al reprogramar', err.message || 'No se pudo mover el turno VIP', 'error');
-      }
-    } else {
-      try {
-        const startsAt = new Date(`${selectedDate}T${selectedTime}:00-05:00`);
-        await api.post('/api/appointments', {
-          serviceId: selectedService.id,
-          barberId: selectedBarber || undefined,
-          startsAt
-        });
-        showAlert('¡Cita Confirmada!', `Tu turno quedó reservado para el ${selectedDate} a las ${selectedTime}.`, 'success');
-      } catch (err: any) {
-        showAlert('No se pudo agendar', err.message || 'Error al confirmar la cita', 'error');
-      }
-    }
-  };
-
-  const handleCancelMyAppointment = async (id: string) => {
     try {
-      await api.patch(`/api/appointments/${id}/cancel`, {});
-      showAlert('Cita Cancelada', 'Tu cita ha sido cancelada exitosamente.', 'success');
+      const startsAt = new Date(`${selectedDate}T${selectedTime}:00-05:00`);
+      await api.post('/api/appointments', {
+        serviceId: selectedService.id,
+        barberId: selectedBarber || undefined,
+        startsAt
+      });
+      setConfirmSuccess(true);
     } catch (err: any) {
-      showAlert('Error', err.message || 'No se pudo cancelar', 'error');
+      alert(err.message || 'Error al confirmar la cita');
     }
   };
 
@@ -198,17 +175,7 @@ export default function PublicBooking() {
           <div className="client-welcome-greeting">
             <b>{org.name}</b>
             <span>
-              {currentUser ? (
-                myVipData ? (
-                  <span style={{ color: '#d97706', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                    <Crown size={15} color="#f59e0b" /> {currentUser.name} (Cliente VIP)
-                  </span>
-                ) : (
-                  `👋 Bienvenido, ${currentUser.name}`
-                )
-              ) : (
-                'Agenda tu cita en segundos'
-              )}
+              {currentUser ? `👋 Bienvenido, ${currentUser.name}` : 'Agenda tu cita en segundos'}
             </span>
           </div>
         </div>
@@ -226,88 +193,41 @@ export default function PublicBooking() {
         </div>
       </header>
 
-      {/* 2. CUERPO */}
+      {/* 2. CUERPO PRINCIPAL */}
       <div className="client-content-container">
         
-        {/* BANNER VIP DINÁMICO */}
-        {myVipData && !isReschedulingVip && (
-          <div style={{ background: '#fffdf5', border: '1.5px solid #fde68a', borderRadius: 18, padding: '18px 24px', marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, boxShadow: '0 4px 15px rgba(217, 119, 6, 0.06)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#fef3c7', display: 'grid', placeItems: 'center' }}>
-                <Crown size={24} color="#d97706" />
-              </div>
-              <div>
-                <b style={{ color: '#92400e', fontSize: 16, display: 'block' }}>Tu Turno Fijo VIP Semanal está Asegurado</b>
-                <span style={{ color: '#b45309', fontSize: 13 }}>
-                  Tienes reservado todos los <b>{weekdayNames[myVipData.weekday]} a las {myVipData.time}</b>. Tienes hasta 2 citas adicionales esta semana.
-                </span>
-              </div>
-            </div>
-
-            <button
-              onClick={() => {
-                setIsReschedulingVip(true);
-                setSelectedDate('');
-                setSelectedTime('');
-              }}
-              className="btn-vip-reschedule"
-            >
-              <RefreshCw size={15} /> Cambiar Turno Esta Semana
-            </button>
-          </div>
-        )}
-
-        {/* PRÓXIMAS CITAS DEL CLIENTE */}
-        {myUpcomingAppointments.length > 0 && (
-          <div className="upcoming-appointments-box">
-            <b style={{ color: '#1e3a8a', fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <CalIcon size={18} color="#1554ff" /> Tus Próximas Citas Agendadas
-            </b>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-              {myUpcomingAppointments.map(apt => (
-                <div key={apt.id} className="upcoming-apt-card">
-                  <div>
-                    <b style={{ fontSize: 14, color: '#0b1020' }}>
-                      {new Date(apt.startsAt).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })}
-                    </b>
-                    <span style={{ display: 'block', fontSize: 13, color: '#64748b', marginTop: 2 }}>
-                      Hora: {new Date(apt.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {apt.service?.name} (${Number(apt.price).toLocaleString('es-CO')}) · Barbero: {apt.barber?.displayName || 'Asignado'}
-                    </span>
-                  </div>
-                  <button onClick={() => handleCancelMyAppointment(apt.id)} className="btn-action-sm btn-cancel">
-                    Cancelar Cita
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* MODO REPROGRAMACIÓN ACTIVO */}
-        {isReschedulingVip && (
-          <div style={{ background: '#eff6ff', border: '1.5px solid #93c5fd', borderRadius: 16, padding: '16px 22px', marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <RefreshCw size={24} color="#1554ff" className="animate-spin" />
-              <div>
-                <b style={{ color: '#1e3a8a', fontSize: 15, display: 'block' }}>Modo Reprogramación VIP Activo</b>
-                <span style={{ color: '#1d4ed8', fontSize: 13 }}>
-                  Selecciona en el calendario un día y hora disponible para mover tu turno fijo de esta semana. Tu hora habitual se liberará de inmediato.
-                </span>
-              </div>
-            </div>
-            <button onClick={() => setIsReschedulingVip(false)} className="btn-logout-modern">
-              Cancelar
-            </button>
+        {/* Selector de Servicios */}
+        {org.services?.length > 1 && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 20, overflowX: 'auto', paddingBottom: 6 }}>
+            {org.services.map((svc: any) => (
+              <button
+                key={svc.id}
+                onClick={() => setSelectedService(svc)}
+                className="clean-tab-btn"
+                style={{
+                  background: selectedService?.id === svc.id ? '#1554ff' : '#ffffff',
+                  color: selectedService?.id === svc.id ? '#ffffff' : '#0b1020',
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: 30,
+                  padding: '8px 18px',
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                  fontSize: 13
+                }}
+              >
+                {svc.name} · ${Number(svc.price).toLocaleString('es-CO')}
+              </button>
+            ))}
           </div>
         )}
 
         <div className="client-grid">
           
-          {/* Calendario con DOMINGO a SÁBADO */}
+          {/* Calendario */}
           <div className="client-calendar-card">
             <div className="cal-header-bar">
               <div>
-                <span className="cal-eyebrow">{isReschedulingVip ? 'REPROGRAMAR TURNO VIP' : 'AGENDA ONLINE'}</span>
+                <span className="cal-eyebrow">AGENDA ONLINE</span>
                 <h2 className="cal-month-title">Septiembre 2026</h2>
               </div>
               <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Próximos 7 días hábiles</span>
@@ -318,29 +238,54 @@ export default function PublicBooking() {
             </div>
 
             <div className="cal-days-grid">
+              {/* Celdas vacías al inicio para alinear con el día 1 de la semana */}
               {emptyPaddingDays.map((_, i) => (
                 <div key={`empty-${i}`} className="cal-cell cell-disabled" style={{ opacity: 0.15 }}></div>
               ))}
 
+              {/* DÍAS DEL MES */}
               {currentMonthDays.map((d, index) => {
                 const isSelected = selectedDate === d.dateStr;
-                const isClosed = d.isDayClosedInDb;
+                const isFull = fullDaysMap[d.dateStr] === true;
 
+                // Si está fuera de los 7 días permitidos
+                if (!d.inRange) {
+                  return (
+                    <div key={index} className="cal-cell cell-disabled">
+                      <div className="cal-cell-num">{d.dayNum}</div>
+                      <div className="cal-cell-status">
+                        <span style={{ color: '#94a3b8' }}>Inactivo</span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // SI ESTÁ LLENO O CERRADO: ROJO Y "Lleno ●"
+                if (isFull) {
+                  return (
+                    <div
+                      key={index}
+                      onClick={() => handleDaySelect(d)}
+                      className={`cal-cell status-red ${isSelected ? 'cell-selected' : ''}`}
+                    >
+                      <div className="cal-cell-num">{d.dayNum}</div>
+                      <div className="cal-cell-status">
+                        <span>Lleno ●</span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // SI TIENE HORAS LIBRES: VERDE Y "● Libre"
                 return (
                   <div
                     key={index}
                     onClick={() => handleDaySelect(d)}
-                    className={`cal-cell ${isClosed ? 'status-red' : !d.inRange ? 'cell-disabled' : 'status-green'} ${isSelected ? 'cell-selected' : ''}`}
+                    className={`cal-cell status-green ${isSelected ? 'cell-selected' : ''}`}
                   >
                     <div className="cal-cell-num">{d.dayNum}</div>
                     <div className="cal-cell-status">
-                      {isClosed ? (
-                        <span style={{ color: '#dc2626' }}>Cerrado</span>
-                      ) : !d.inRange ? (
-                        <span style={{ color: '#94a3b8' }}>Inactivo</span>
-                      ) : (
-                        <span>● Libre</span>
-                      )}
+                      <span>● Libre</span>
                     </div>
                   </div>
                 );
@@ -351,9 +296,7 @@ export default function PublicBooking() {
           {/* Resumen lateral */}
           <div className="client-sidebar">
             <div className="client-summary-card">
-              <h3 style={{ fontSize: 18, fontFamily: 'Sora', marginBottom: 16 }}>
-                {isReschedulingVip ? 'Confirmar Reprogramación VIP' : 'Resumen de tu Turno'}
-              </h3>
+              <h3 style={{ fontSize: 18, fontFamily: 'Sora', marginBottom: 16 }}>Resumen de tu Turno</h3>
 
               <div className="client-summary-row">
                 <span>Servicio</span>
@@ -361,44 +304,43 @@ export default function PublicBooking() {
               </div>
 
               <div className="client-summary-row">
-                <span>Fecha Nueva</span>
+                <span>Fecha</span>
                 <b>{selectedDate || 'Elige en el calendario'}</b>
               </div>
 
               <div className="client-summary-row">
-                <span>Hora Nueva</span>
+                <span>Hora</span>
                 <b>{selectedTime || 'Sin seleccionar'}</b>
               </div>
 
               <div className="client-summary-row">
                 <span>Total a pagar</span>
                 <span className="client-summary-total">
-                  {isReschedulingVip ? '$0 (Turno VIP)' : `$${selectedService ? Number(selectedService.price).toLocaleString('es-CO') : '25.000'}`}
+                  ${selectedService ? Number(selectedService.price).toLocaleString('es-CO') : '25.000'}
                 </span>
               </div>
 
               <div style={{ marginTop: 20 }}>
                 <button
-                  onClick={handleConfirmAction}
+                  onClick={handleConfirmAppointment}
                   disabled={!selectedDate || !selectedTime}
                   className="btn-clean-submit"
-                  style={isReschedulingVip ? { background: 'linear-gradient(135deg, #d97706, #f59e0b)', color: '#0b1020' } : {}}
                 >
-                  {isReschedulingVip ? 'Confirmar Cambio de Turno VIP →' : 'Confirmar cita →'}
+                  Confirmar cita →
                 </button>
               </div>
             </div>
 
             <div className="client-wa-card">
               <h4>📱 Recordatorios por WhatsApp</h4>
-              <p>El sistema te notificará en tiempo real sobre confirmaciones o reprogramaciones de turno.</p>
+              <p>Al confirmar tu cita, el sistema te enviará una notificación con la fecha, hora y servicio agendado sin costo adicional.</p>
             </div>
           </div>
 
         </div>
       </div>
 
-      {/* MODAL DE HORARIOS FLOTANTE */}
+      {/* MODAL DE HORARIOS FLOTANTE EN EL CENTRO */}
       {showHoursModal && (
         <div className="modal-hours-overlay">
           <div className="modal-hours-box">
@@ -420,7 +362,7 @@ export default function PublicBooking() {
             {loadingHours ? (
               <div style={{ padding: 30, textAlign: 'center', color: '#64748b' }}>Consultando turnos...</div>
             ) : freeHours.length === 0 ? (
-              <div style={{ padding: 40, textAlign: 'center', color: '#ef4444', fontWeight: 700 }}>
+              <div style={{ padding: 40, textAlign: 'center', color: '#ef4444', fontWeight: 800 }}>
                 Este día se encuentra cerrado o totalmente lleno.
               </div>
             ) : (
@@ -444,25 +386,19 @@ export default function PublicBooking() {
         </div>
       )}
 
-      {/* MODAL DE ALERTAS FLOTANTES ASYS */}
-      {alertModal && alertModal.open && (
+      {/* MODAL CONFIRMACIÓN ÉXITO */}
+      {confirmSuccess && (
         <div className="modal-hours-overlay">
-          <div className="asys-alert-modal">
-            <div className={`asys-alert-icon ${alertModal.type}`}>
-              {alertModal.type === 'success' && <CheckCircle2 size={32} />}
-              {alertModal.type === 'error' && <AlertCircle size={32} />}
-              {alertModal.type === 'info' && <Sparkles size={32} />}
-            </div>
-            <h3 style={{ fontFamily: 'Sora', fontSize: 20, marginBottom: 8, color: '#0b1020' }}>{alertModal.title}</h3>
-            <p style={{ color: '#64748b', fontSize: 14, lineHeight: 1.5, marginBottom: 22 }}>
-              {alertModal.message}
+          <div className="modal-hours-box" style={{ textAlign: 'center', maxWidth: 420 }}>
+            <CheckCircle2 size={50} color="#10b981" style={{ margin: '0 auto 12px' }} />
+            <h3 style={{ fontSize: 20, fontFamily: 'Sora', marginBottom: 6 }}>¡Cita Confirmada!</h3>
+            <p style={{ color: '#64748b', fontSize: 13, lineHeight: 1.6 }}>
+              Tu turno quedó reservado para el <b>{selectedDate}</b> a las <b>{selectedTime}</b> en <b>{org.name}</b>.
             </p>
             <button
-              onClick={() => {
-                setAlertModal(null);
-                if (alertModal.type === 'success') window.location.reload();
-              }}
+              onClick={() => { setConfirmSuccess(false); window.location.reload(); }}
               className="btn-clean-submit"
+              style={{ marginTop: 18 }}
             >
               Aceptar
             </button>

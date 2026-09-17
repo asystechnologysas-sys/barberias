@@ -683,8 +683,10 @@ h1, h2, h3, b, .font-sora {
   background: #fef2f2;
   border-color: #fecaca;
 }
-.cal-cell.status-red .cal-cell-status {
-  color: #dc2626;
+.cal-cell.status-red .cal-cell-status,
+.cal-cell.status-red span {
+  color: #dc2626 !important;
+  font-weight: 800;
 }
 .cal-cell.status-red:hover {
   border-color: #dc2626;
