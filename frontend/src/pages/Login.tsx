@@ -1,12 +1,15 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import logoAsys from './logoAsys.png';
 
 export default function Login() {
+  const { slug } = useParams<{ slug?: string }>();
   const navigate = useNavigate();
   const [tab, setTab] = useState<'login' | 'register'>('login');
   
+  const [tenantInfo, setTenantInfo] = useState<any>(null);
+
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -15,12 +18,20 @@ export default function Login() {
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Si se ingresó con slug, cargar datos del tenant para personalizar el logo y nombre
+  useEffect(() => {
+    if (slug) {
+      api.get(`/api/public/${slug}`)
+        .then((data) => setTenantInfo(data))
+        .catch(() => setTenantInfo(null));
+    }
+  }, [slug]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setLoading(true);
 
-    // Limpieza obligatoria antes de crear o iniciar sesión
     localStorage.removeItem('asys_token');
     localStorage.removeItem('asys_user');
 
@@ -28,24 +39,31 @@ export default function Login() {
       if (tab === 'login') {
         const res = await api.post('/api/auth/login', {
           email: loginUser,
-          password
+          password,
+          slug: slug || undefined
         });
         localStorage.setItem('asys_token', res.token);
         localStorage.setItem('asys_user', JSON.stringify(res.user));
 
-        if (res.user.role === 'SUPERADMIN') navigate('/superadmin');
-        else if (res.user.role === 'OWNER' || res.user.role === 'BARBER') navigate('/admin');
-        else navigate('/b/asysbarber');
+        if (res.user.role === 'SUPERADMIN') {
+          navigate('/superadmin');
+        } else if (res.user.role === 'OWNER' || res.user.role === 'BARBER') {
+          navigate('/admin');
+        } else {
+          const targetSlug = res.user.organizationSlug || slug || 'asysbarber';
+          navigate(`/b/${targetSlug}`);
+        }
       } else {
+        const targetSlug = slug || 'asysbarber';
         const res = await api.post('/api/auth/register', {
-          slug: 'asysbarber',
+          slug: targetSlug,
           name,
           phone,
           password
         });
         localStorage.setItem('asys_token', res.token);
         localStorage.setItem('asys_user', JSON.stringify(res.user));
-        navigate('/b/asysbarber');
+        navigate(`/b/${targetSlug}`);
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Error en autenticación');
@@ -54,10 +72,13 @@ export default function Login() {
     }
   };
 
+  const brandName = tenantInfo?.name || 'ASYS BARBER';
+  const brandLogo = tenantInfo?.logoUrl || logoAsys;
+
   return (
     <div className="login-split-container">
       <div className="login-visual-side">
-        <div className="badge-brand-chip">⚡ ASYS BARBER SOFTWARE</div>
+        <div className="badge-brand-chip">⚡ {brandName.toUpperCase()} · GESTIÓN DIGITAL</div>
         <div className="login-visual-content">
           <h1 className="login-visual-title">Estilo moderno, agenda sin vueltas.</h1>
           <p className="login-visual-desc">
@@ -74,10 +95,10 @@ export default function Login() {
       <div className="login-form-side">
         <div className="login-card-floating">
           <div className="app-brand-header">
-            <img src={logoAsys} alt="ASYS Barber" className="app-brand-avatar" />
+            <img src={brandLogo} alt={brandName} className="app-brand-avatar" />
             <div className="app-brand-titles">
-              <b>ASYS BARBER</b>
-              <span>SOFTWARE DE GESTIÓN</span>
+              <b>{brandName}</b>
+              <span>{tenantInfo ? 'PORTAL OFICIAL DE CLIENTES' : 'SOFTWARE DE GESTIÓN'}</span>
             </div>
           </div>
 
@@ -178,7 +199,9 @@ export default function Login() {
 
           <div className="clean-note-box">
             <b>Acceso a la plataforma</b>
-            Clientes, barberos y dueños acceden según los permisos de su cuenta.
+            {tenantInfo
+              ? `Estás ingresando a ${tenantInfo.name}. Tu agenda quedará asociada a esta barbería.`
+              : 'Clientes, barberos y dueños acceden según los permisos de su cuenta.'}
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { X, CheckCircle2, LogOut, Crown, AlertCircle, RefreshCw, Sparkles, Calendar as CalIcon } from 'lucide-react';
+import { X, CheckCircle2, LogOut, Crown, AlertCircle, RefreshCw, Sparkles, Calendar as CalIcon, ShieldAlert } from 'lucide-react';
 import { api } from '../api';
 
 export default function PublicBooking() {
@@ -19,7 +19,7 @@ export default function PublicBooking() {
   const [freeHours, setFreeHours] = useState<string[]>([]);
   const [loadingHours, setLoadingHours] = useState(false);
 
-  // Mapa de estado real idéntico al panel del barbero
+  // Mapa de estado real idéntico al barbero
   const [dayStatusMap, setDayStatusMap] = useState<{
     [dateStr: string]: { status: string; statusText: string; isFull: boolean; isClosed: boolean; freeCount: number };
   }>({});
@@ -208,7 +208,7 @@ export default function PublicBooking() {
   const handleConfirmAction = async () => {
     if (!token) {
       showAlert('Acceso Requerido', 'Por favor inicia sesión para registrar tu turno.', 'info');
-      navigate('/login');
+      navigate(`/login/${slug}`);
       return;
     }
 
@@ -268,12 +268,42 @@ export default function PublicBooking() {
     localStorage.removeItem('asys_token');
     localStorage.removeItem('asys_user');
     api.post('/api/auth/logout', {}).catch(() => {});
-    navigate('/login');
+    navigate(`/login/${slug}`);
   };
 
-  if (loading) return <div style={{ padding: 100, textAlign: 'center', color: '#64748b' }}>Cargando barbería...</div>;
-  if (!org) return <div style={{ padding: 100, textAlign: 'center', color: '#ef4444' }}>Barbería no disponible.</div>;
+  // 1. ESTADO DE CARGA
+  if (loading) {
+    return <div style={{ padding: 100, textAlign: 'center', color: '#64748b' }}>Cargando barbería...</div>;
+  }
 
+  // 2. SI LA BARBERÍA NO EXISTE
+  if (!org) {
+    return <div style={{ padding: 100, textAlign: 'center', color: '#ef4444' }}>Barbería no disponible.</div>;
+  }
+
+  // 3. SI LA BARBERÍA FUE PAUSADA POR EL SUPERADMIN (PANTALLA DE SUSPENSIÓN)
+  if (org.isSuspended) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f8fafc', padding: 20 }}>
+        <div style={{ maxWidth: 480, background: '#ffffff', border: '1.5px solid #fecaca', borderRadius: 24, padding: '44px 32px', textAlign: 'center', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.08)' }}>
+          <div style={{ width: 68, height: 68, borderRadius: '50%', background: '#fee2e2', color: '#dc2626', display: 'grid', placeItems: 'center', margin: '0 auto 18px' }}>
+            <ShieldAlert size={38} />
+          </div>
+          <h2 style={{ fontFamily: 'Sora', fontSize: 22, color: '#0b1020', marginBottom: 10 }}>
+            Servicio Temporalmente Suspendido
+          </h2>
+          <p style={{ color: '#64748b', fontSize: 14, lineHeight: 1.6, marginBottom: 24 }}>
+            La barbería <b>{org.name}</b> no se encuentra disponible para reservas en este momento debido a una pausa en su suscripción o mantenimiento programado.
+          </p>
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '12px 16px', fontSize: 12, color: '#64748b' }}>
+            Si eres el dueño o administrador de este negocio, contacta a soporte técnico de <b>ASYS Control</b> para reactivar tu servicio.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 4. RENDER PRINCIPAL (BARBERÍA ACTIVA)
   return (
     <div className="client-page-wrap">
       
@@ -307,7 +337,7 @@ export default function PublicBooking() {
               <LogOut size={15} /> Cerrar sesión
             </button>
           ) : (
-            <Link to="/login" className="btn-clean-submit" style={{ padding: '8px 18px', textDecoration: 'none', display: 'inline-block', fontSize: 13 }}>
+            <Link to={`/login/${slug}`} className="btn-clean-submit" style={{ padding: '8px 18px', textDecoration: 'none', display: 'inline-block', fontSize: 13 }}>
               Iniciar Sesión
             </Link>
           )}
@@ -440,7 +470,6 @@ export default function PublicBooking() {
               {currentMonthDays.map((d, index) => {
                 const isSelected = selectedDate === d.dateStr;
 
-                // Fuera del rango de 7 días: inactivo
                 if (!d.inRange) {
                   return (
                     <div key={index} className="cal-cell cell-disabled" style={{ minHeight: 64, textAlign: 'center' }}>
@@ -452,7 +481,6 @@ export default function PublicBooking() {
                   );
                 }
 
-                // Días activos: idénticos al panel del barbero
                 const statusInfo = dayStatusMap[d.dateStr];
                 const status = statusInfo?.status || 'green';
                 const statusText = statusInfo?.statusText || 'Disponible ●';

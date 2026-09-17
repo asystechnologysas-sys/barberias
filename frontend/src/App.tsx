@@ -5,17 +5,14 @@ import SuperAdmin from './pages/SuperAdmin';
 import BarberDashboard from './pages/BarberDashboard';
 import PublicBooking from './pages/PublicBooking';
 
-// Componente guardián: protege los paneles administrativos
 function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; allowedRole?: string }) {
   const token = localStorage.getItem('asys_token');
   const userStr = localStorage.getItem('asys_user');
 
-  // Si no hay token guardado, redirigir al login obligatoriamente
   if (!token) {
     return <Navigate to="/login" replace />;
   }
 
-  // Si se exige un rol específico y no coincide, redirigir al login
   if (allowedRole && userStr) {
     try {
       const user = JSON.parse(userStr);
@@ -34,16 +31,18 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* La ruta principal AHORA SIEMPRE envía al login */}
         <Route path="/" element={<Navigate to="/login" replace />} />
 
-        {/* Pantalla oficial de Login */}
+        {/* Login global */}
         <Route path="/login" element={<Login />} />
+
+        {/* Login con tenant específico (ej. /login/elite) */}
+        <Route path="/login/:slug" element={<Login />} />
 
         {/* Portal de agendamiento para clientes */}
         <Route path="/b/:slug" element={<PublicBooking />} />
 
-        {/* Panel del Barbero (PROTEGIDO: Requiere sesión) */}
+        {/* Panel del Barbero / Dueño */}
         <Route
           path="/admin"
           element={
@@ -53,7 +52,7 @@ export default function App() {
           }
         />
 
-        {/* Panel Central Superadmin (PROTEGIDO: Solo SUPERADMIN) */}
+        {/* Panel Central SuperAdmin Multi-Tenant */}
         <Route
           path="/superadmin"
           element={
@@ -63,7 +62,6 @@ export default function App() {
           }
         />
 
-        {/* Cualquier otra ruta redirige al login */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>
