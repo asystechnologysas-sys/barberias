@@ -16,8 +16,9 @@ const db = new PrismaClient();
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key_long_enough_2026';
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || '';
 
-// Configuración de carpeta pública para subida de logos
+// Configuración de uploads
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -34,7 +35,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // Máximo 5MB
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
@@ -50,8 +51,6 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '64kb' }));
 app.use(cookieParser());
 app.use(rateLimit({ windowMs: 15 * 60_000, max: 1000, standardHeaders: true, legacyHeaders: false }));
-
-// Servir estáticamente los logos subidos
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 type Auth = { id: string; role: Role; organizationId: string | null };
@@ -95,6 +94,20 @@ const toBogotaHour = (date: Date) => {
   return date.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
+// Disparador genérico a n8n
+async function triggerN8N(payload: any) {
+  if (!N8N_WEBHOOK_URL) return;
+  try {
+    await fetch(N8N_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+  } catch (err) {
+    console.error('Error enviando notificación a n8n:', err);
+  }
+}
+
 const MASTER_HOURS = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
 
 // 1. HEALTH & PUBLIC TENANT
@@ -126,7 +139,7 @@ app.get('/api/public/:slug', asyncRoute(async (req, res) => {
   });
 }));
 
-// DISPONIBILIDAD EXACTA (SOPORTE MULTI-BARBERO Y PREFERENCIA)
+// DISPONIBILIDAD EXACTA
 app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
   const dateStr = String(req.query.date);
   const barberIdParam = req.query.barberId ? String(req.query.barberId) : null;
@@ -299,7 +312,50 @@ app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
   });
 }));
 
-// 2. AUTHENTICATION (CON AUTODETECCIÓN DE BARBERO)
+// 2. AUTHENTICATION & VERIFICACIÓN OTP POR WHATSAPP (N8N)
+app.post('/api/auth/send-otp', asyncRoute(async (req, res) => {
+  const v = z.object({
+    slug: z.string(),
+    phone: z.string().min(7)
+  }).parse(req.body);
+
+  const org = await db.organization.findUnique({ where: { slug: v.slug } });
+  if (!org) return fail(res, 404, 'ORGANIZATION_NOT_FOUND', 'Barbería no encontrada.');
+
+  let cleanPhone = v.phone.replace(/[^0-9]/g, '');
+  if (cleanPhone.length === 10) cleanPhone = `57${cleanPhone}`; // Formato internacional Colombia
+
+  // Generar código de 6 dígitos numéricos
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const codeHash = await bcrypt.hash(code, 8);
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
+
+  // Guardar en la tabla Otp
+  await db.otp.create({
+    data: {
+      organizationId: org.id,
+      phone: cleanPhone,
+      codeHash,
+      expiresAt
+    }
+  });
+
+  // Disparar a n8n para envío por WhatsApp
+  triggerN8N({
+    tipo: 'OTP',
+    phone: cleanPhone,
+    code,
+    tenantName: org.name
+  });
+
+  res.json({
+    success: true,
+    data: {
+      message: 'Código de verificación enviado por WhatsApp exitosamente.'
+    }
+  });
+}));
+
 app.post('/api/auth/login', asyncRoute(async (req, res) => {
   const v = z.object({
     email: z.string(),
@@ -391,14 +447,38 @@ app.post('/api/auth/register', asyncRoute(async (req, res) => {
     slug: z.string(),
     name: z.string().min(2),
     phone: z.string().min(7),
-    password: z.string().min(4)
+    password: z.string().min(4),
+    code: z.string().min(4) // Código de WhatsApp obligatorio
   }).parse(req.body);
 
   const org = await db.organization.findUnique({ where: { slug: v.slug } });
   if (!org) return fail(res, 404, 'ORGANIZATION_NOT_FOUND', 'Barbería no encontrada.');
 
-  const cleanPhone = v.phone.replace(/[^0-9+]/g, '');
-  const generatedEmail = `${cleanPhone.replace('+', '')}@${org.slug}.local`;
+  let cleanPhone = v.phone.replace(/[^0-9]/g, '');
+  if (cleanPhone.length === 10) cleanPhone = `57${cleanPhone}`;
+
+  // 1. VALIDAR CÓDIGO OTP
+  const latestOtp = await db.otp.findFirst({
+    where: {
+      organizationId: org.id,
+      phone: cleanPhone,
+      usedAt: null,
+      expiresAt: { gt: new Date() }
+    },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  if (!latestOtp || !(await bcrypt.compare(v.code, latestOtp.codeHash))) {
+    return fail(res, 400, 'INVALID_OTP', 'El código de WhatsApp es incorrecto o ha vencido. Solicita uno nuevo.');
+  }
+
+  // Marcar OTP usado
+  await db.otp.update({
+    where: { id: latestOtp.id },
+    data: { usedAt: new Date() }
+  });
+
+  const generatedEmail = `${cleanPhone}@${org.slug}.local`;
   const passwordHash = await bcrypt.hash(v.password, 10);
 
   const existingUser = await db.user.findFirst({
@@ -598,7 +678,7 @@ app.patch('/api/services/:id', auth, activeTenant, asyncRoute(async (req, res) =
   res.json({ success: true, data: updated });
 }));
 
-// 5. CITAS (CON VALIDACIÓN DE RANGO EXACTA PARA EVITAR EXCLUSION CONSTRAINT)
+// 5. CITAS (CON DISPARADOR DE NOTIFICACIÓN ELEGANTE A N8N)
 app.post('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) => {
   try {
     const v = z.object({
@@ -646,7 +726,11 @@ app.post('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) =>
       return fail(res, 400, 'LIMIT_REACHED', `Has alcanzado el límite de ${maxAllowed} citas activas esta semana.`);
     }
 
-    const service = await db.service.findFirst({ where: { id: v.serviceId, organizationId: orgId } });
+    const [service, org] = await Promise.all([
+      db.service.findFirst({ where: { id: v.serviceId, organizationId: orgId } }),
+      db.organization.findUnique({ where: { id: orgId } })
+    ]);
+
     if (!service) return fail(res, 404, 'SERVICE_NOT_FOUND', 'Servicio no encontrado.');
 
     const startsAt = v.startsAt;
@@ -657,14 +741,12 @@ app.post('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) =>
     let selectedBarberId = v.barberId && v.barberId !== 'any' ? v.barberId : null;
 
     if (!selectedBarberId) {
-      // Buscar el barbero libre con mayor jerarquía (menor priority)
       const barbers = await db.barber.findMany({
         where: { organizationId: orgId, active: true },
         orderBy: { priority: 'asc' }
       });
 
       for (const b of barbers) {
-        // Comprobar solapamiento de tiempo estricto: (startsAt < other.endsAt && endsAt > other.startsAt)
         const hasApt = await db.appointment.findFirst({
           where: {
             barberId: b.id,
@@ -693,7 +775,6 @@ app.post('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) =>
         }
       }
     } else {
-      // Si eligió un barbero específico, verificar que esté libre en ese rango
       const hasApt = await db.appointment.findFirst({
         where: {
           barberId: selectedBarberId,
@@ -726,6 +807,19 @@ app.post('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) =>
         status: AppointmentStatus.CONFIRMED
       },
       include: { barber: true }
+    });
+
+    // Disparar WhatsApp a n8n con el mensaje de cita agendada
+    triggerN8N({
+      tipo: 'APPOINTMENT_CONFIRMED',
+      tenantName: org?.name || 'ASYS Barber',
+      clientName: u.name,
+      clientPhone: u.phone || client.phone,
+      barberName: appointment.barber?.displayName || 'Tu Barbero',
+      serviceName: service.name,
+      price: service.price,
+      date: startsAt.toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'long' }),
+      time: toBogotaHour(startsAt)
     });
 
     res.status(201).json({ success: true, data: appointment });
@@ -985,7 +1079,7 @@ app.post('/api/vip/reschedule-week', auth, activeTenant, asyncRoute(async (req, 
   res.json({ success: true, data: newAppointment });
 }));
 
-// 8. SUPERADMIN: GESTIÓN MULTI-TENANT, SUBIDA DE IMÁGENES Y BARBEROS
+// 8. SUPERADMIN
 app.post('/api/superadmin/upload', auth, role(Role.SUPERADMIN), upload.single('logo'), (req: Request, res: Response) => {
   if (!req.file) return fail(res, 400, 'NO_FILE', 'No se ha subido ningún archivo.');
   const fileUrl = `/uploads/${req.file.filename}`;
@@ -1054,7 +1148,8 @@ app.post('/api/superadmin/organizations', auth, role(Role.SUPERADMIN), asyncRout
 
   if (v.barbers.length > 0) {
     for (const b of v.barbers) {
-      const cleanPhone = b.phone.replace(/[^0-9+]/g, '');
+      let cleanPhone = b.phone.replace(/[^0-9]/g, '');
+      if (cleanPhone.length === 10) cleanPhone = `57${cleanPhone}`;
       await db.allowedBarber.create({
         data: {
           organizationId: org.id,
@@ -1099,7 +1194,8 @@ app.post('/api/superadmin/organizations/:id/barbers', auth, role(Role.SUPERADMIN
     priority: z.number().int().default(1)
   }).parse(req.body);
 
-  const cleanPhone = v.phone.replace(/[^0-9+]/g, '');
+  let cleanPhone = v.phone.replace(/[^0-9]/g, '');
+  if (cleanPhone.length === 10) cleanPhone = `57${cleanPhone}`;
   const orgId = String(req.params.id);
 
   const allowed = await db.allowedBarber.upsert({
