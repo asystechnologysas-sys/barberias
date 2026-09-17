@@ -26,14 +26,14 @@ export default function PublicBooking() {
   const [isReschedulingVip, setIsReschedulingVip] = useState(false);
   const [myVipData, setMyVipData] = useState<any>(null);
 
-  // Modal de alertas ASYS (Cero alertas nativas)
+  // Modal de alertas ASYS
   const [alertModal, setAlertModal] = useState<{ open: boolean; title: string; message: string; type: 'info' | 'success' | 'error' } | null>(null);
 
   const token = localStorage.getItem('asys_token');
   const userStr = localStorage.getItem('asys_user');
   const currentUser = userStr ? JSON.parse(userStr) : null;
 
-  const masterDayHours = ['09:00', '10:00', '11:00', '12:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
+  const masterHoursAll = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
   const weekdayNames = ['Domingos', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábados'];
 
   const showAlert = (title: string, message: string, type: 'info' | 'success' | 'error' = 'info') => {
@@ -41,7 +41,7 @@ export default function PublicBooking() {
   };
 
   useEffect(() => {
-    // Cargar barbería
+    // Cargar información de la barbería
     api.get(`/api/public/${slug}`)
       .then(data => {
         setOrg(data);
@@ -51,7 +51,7 @@ export default function PublicBooking() {
       })
       .catch(() => setLoading(false));
 
-    // Si está autenticado, cargar su horario VIP real y sus citas futuras
+    // Si hay sesión iniciada, cargar su turno VIP propio y sus próximas citas
     if (token) {
       api.get('/api/vip/my-schedule')
         .then(vip => setMyVipData(vip))
@@ -67,7 +67,7 @@ export default function PublicBooking() {
     }
   }, [slug, token]);
 
-  // CALENDARIO DOMINGO A SÁBADO
+  // CALENDARIO DOMINGO A SÁBADO CON ALINEACIÓN REAL
   const today = new Date();
   const year = today.getFullYear();
   const month = today.getMonth();
@@ -76,23 +76,81 @@ export default function PublicBooking() {
 
   const emptyPaddingDays = Array.from({ length: firstDayIndex }, (_, i) => i);
 
+  // CÁLCULO DEL SEMÁFORO EN TIEMPO REAL PARA CADA DÍA
   const currentMonthDays = Array.from({ length: daysInMonth }, (_, i) => {
     const d = new Date(year, month, i + 1);
     const dateStr = d.toISOString().split('T')[0];
+    const dayOfWeek = d.getDay();
     const diffDays = Math.floor((d.getTime() - new Date(today.toDateString()).getTime()) / (1000 * 60 * 60 * 24));
     const inRange = diffDays >= 0 && diffDays <= 7;
 
-    const isDayClosedInDb = org?.blockedSlots?.some((b: any) => {
+    // 1. Verificar si el día está cerrado por bloqueo o por horario semanal
+    const isFullDayClosed = org?.blockedSlots?.some((b: any) => {
       const bStart = new Date(b.startsAt);
       const bEnd = new Date(b.endsAt);
       return bStart <= new Date(`${dateStr}T00:00:00-05:00`) && bEnd >= new Date(`${dateStr}T23:59:59-05:00`);
     });
 
+    const sched = org?.schedules?.find((s: any) => s.weekday === dayOfWeek);
+    const isClosed = isFullDayClosed || !!sched?.closed;
+
+    // 2. Calcular horas de trabajo para este día
+    const openH = Number((sched?.openTime || '09:00').slice(0, 2));
+    const closeH = Number((sched?.closeTime || '20:00').slice(0, 2));
+    const workingSlots = masterHoursAll.filter(h => {
+      const slotH = Number(h.slice(0, 2));
+      return slotH >= openH && slotH < closeH;
+    });
+    const totalSlots = workingSlots.length;
+
+    // 3. Contar horas ocupadas en esa fecha
+    const dayApts = org?.appointments?.filter((a: any) => {
+      const aptDate = new Date(a.startsAt).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+      return aptDate === dateStr;
+    }) || [];
+
+    const dayBlocks = org?.blockedSlots?.filter((b: any) => {
+      const bDate = new Date(b.startsAt).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+      return bDate === dateStr && !isFullDayClosed;
+    }) || [];
+
+    const dayVips = org?.vipSchedules?.filter((v: any) => {
+      if (v.weekday !== dayOfWeek) return false;
+      const isSkipped = v.exceptions?.some((e: any) => {
+        const exDate = new Date(e.date).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+        return exDate === dateStr;
+      });
+      return !isSkipped;
+    }) || [];
+
+    const occupiedCount = dayApts.length + dayBlocks.length + dayVips.length;
+    const freeSlotsCount = Math.max(0, totalSlots - occupiedCount);
+
+    // Determinar clase de color y texto del semáforo
+    let statusClass = 'status-green';
+    let statusText = `${freeSlotsCount} libres ●`;
+
+    if (isClosed) {
+      statusClass = 'status-red';
+      statusText = 'Cerrado';
+    } else if (totalSlots === 0 || freeSlotsCount === 0) {
+      statusClass = 'status-red';
+      statusText = 'Lleno ●';
+    } else if (freeSlotsCount <= 2 || (freeSlotsCount / totalSlots) <= 0.5) {
+      statusClass = 'status-yellow';
+      statusText = `${freeSlotsCount} libres ●`;
+    } else {
+      statusClass = 'status-green';
+      statusText = `${freeSlotsCount} libres ●`;
+    }
+
     return {
       dayNum: i + 1,
       dateStr,
-      inRange: inRange && !isDayClosedInDb,
-      isDayClosedInDb
+      inRange: inRange && !isClosed,
+      isClosed,
+      statusClass,
+      statusText
     };
   });
 
@@ -112,7 +170,7 @@ export default function PublicBooking() {
         setFreeHours(serverTimes);
       }
     } catch {
-      setFreeHours(masterDayHours);
+      setFreeHours(['09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00', '18:00']);
     } finally {
       setLoadingHours(false);
     }
@@ -303,7 +361,7 @@ export default function PublicBooking() {
 
         <div className="client-grid">
           
-          {/* Calendario con DOMINGO a SÁBADO */}
+          {/* Calendario con DOMINGO a SÁBADO y Semáforo Sincronizado */}
           <div className="client-calendar-card">
             <div className="cal-header-bar">
               <div>
@@ -324,22 +382,20 @@ export default function PublicBooking() {
 
               {currentMonthDays.map((d, index) => {
                 const isSelected = selectedDate === d.dateStr;
-                const isClosed = d.isDayClosedInDb;
+                const cellClass = !d.inRange ? (d.isClosed ? 'status-red' : 'cell-disabled') : d.statusClass;
 
                 return (
                   <div
                     key={index}
                     onClick={() => handleDaySelect(d)}
-                    className={`cal-cell ${isClosed ? 'status-red' : !d.inRange ? 'cell-disabled' : 'status-green'} ${isSelected ? 'cell-selected' : ''}`}
+                    className={`cal-cell ${cellClass} ${isSelected ? 'cell-selected' : ''}`}
                   >
                     <div className="cal-cell-num">{d.dayNum}</div>
                     <div className="cal-cell-status">
-                      {isClosed ? (
-                        <span style={{ color: '#dc2626' }}>Cerrado</span>
-                      ) : !d.inRange ? (
+                      {!d.inRange && !d.isClosed ? (
                         <span style={{ color: '#94a3b8' }}>Inactivo</span>
                       ) : (
-                        <span>● Libre</span>
+                        <span>{d.statusText}</span>
                       )}
                     </div>
                   </div>
@@ -425,7 +481,7 @@ export default function PublicBooking() {
               </div>
             ) : (
               <div className="modal-hours-grid">
-                {masterDayHours.map((hour) => {
+                {masterHoursAll.map((hour) => {
                   const isAvailable = freeHours.includes(hour);
                   return (
                     <button

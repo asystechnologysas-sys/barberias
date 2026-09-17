@@ -68,15 +68,30 @@ app.get('/api/health', asyncRoute(async (_q, res) => {
 }));
 
 app.get('/api/public/:slug', asyncRoute(async (req, res) => {
+  const now = new Date();
+  const next8Days = new Date(now.getTime() + 9 * 24 * 3600 * 1000);
+
   const org = await db.organization.findUnique({
     where: { slug: String(req.params.slug) },
     include: {
       services: { where: { active: true } },
       barbers: { where: { active: true }, select: { id: true, displayName: true } },
       schedules: true,
-      blockedSlots: true
+      blockedSlots: true,
+      appointments: {
+        where: {
+          status: AppointmentStatus.CONFIRMED,
+          startsAt: { gte: new Date(now.toISOString().split('T')[0] + 'T00:00:00-05:00'), lte: next8Days }
+        },
+        select: { startsAt: true, endsAt: true, barberId: true }
+      },
+      vipSchedules: {
+        where: { active: true },
+        include: { exceptions: true }
+      }
     }
   });
+
   if (!org) return fail(res, 404, 'ORGANIZATION_NOT_FOUND', 'Barbería no encontrada.');
   res.json({ success: true, data: org });
 }));
