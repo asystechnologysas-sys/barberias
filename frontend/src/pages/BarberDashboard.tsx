@@ -255,10 +255,15 @@ export default function BarberDashboard() {
   };
 
   const handleLogout = () => {
+    const userSlug = currentUser?.organizationSlug;
     localStorage.removeItem('asys_token');
     localStorage.removeItem('asys_user');
     api.post('/api/auth/logout', {}).catch(() => {});
-    navigate('/login');
+    if (userSlug) {
+      navigate(`/login/${userSlug}`);
+    } else {
+      navigate('/login');
+    }
   };
 
   const selectedDateDayOfWeek = new Date(`${selectedDate}T12:00:00-05:00`).getDay();
