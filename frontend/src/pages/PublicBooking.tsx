@@ -19,7 +19,7 @@ export default function PublicBooking() {
   const [freeHours, setFreeHours] = useState<string[]>([]);
   const [loadingHours, setLoadingHours] = useState(false);
 
-  // Mapa de estado real idéntico al barbero: { "2026-09-21": { status: 'red' | 'yellow' | 'green' | 'closed', statusText: 'Lleno ●', isFull: true, isClosed: false } }
+  // Mapa de estado real idéntico al panel del barbero
   const [dayStatusMap, setDayStatusMap] = useState<{
     [dateStr: string]: { status: string; statusText: string; isFull: boolean; isClosed: boolean; freeCount: number };
   }>({});
@@ -96,7 +96,7 @@ export default function PublicBooking() {
     };
   });
 
-  // CONSULTA Y CÁLCULO DE DISPONIBILIDAD IDÉNTICO AL PANEL DEL BARBERO
+  // CONSULTA Y ACTUALIZACIÓN EN TIEMPO REAL CON SEMÁFORO DEL BARBERO
   const refreshAvailability = useCallback(async () => {
     if (!org) return;
     const activeDays = currentMonthDays.filter(d => d.inRange);
@@ -119,7 +119,7 @@ export default function PublicBooking() {
             newStatusMap[d.dateStr] = {
               status,
               statusText,
-              isFull: status === 'full' || freeCount === 0,
+              isFull: status === 'full' || status === 'red' || freeCount === 0,
               isClosed,
               freeCount
             };
@@ -421,7 +421,7 @@ export default function PublicBooking() {
             <div className="cal-header-bar">
               <div>
                 <span className="cal-eyebrow">{isReschedulingVip ? 'REPROGRAMAR TURNO VIP' : 'AGENDA ONLINE'}</span>
-                <h2 className="cal-month-title">
+                <h2 className="cal-month-title" style={{ textTransform: 'capitalize' }}>
                   {today.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })}
                 </h2>
               </div>
@@ -434,7 +434,7 @@ export default function PublicBooking() {
 
             <div className="cal-days-grid">
               {emptyPaddingDays.map((_, i) => (
-                <div key={`empty-${i}`} className="cal-cell cell-disabled" style={{ opacity: 0.15 }}></div>
+                <div key={`empty-${i}`} className="cal-cell cell-disabled" style={{ opacity: 0.15, minHeight: 64 }}></div>
               ))}
 
               {currentMonthDays.map((d, index) => {
@@ -443,7 +443,7 @@ export default function PublicBooking() {
                 // Fuera del rango de 7 días: inactivo
                 if (!d.inRange) {
                   return (
-                    <div key={index} className="cal-cell cell-disabled">
+                    <div key={index} className="cal-cell cell-disabled" style={{ minHeight: 64, textAlign: 'center' }}>
                       <div className="cal-cell-num">{d.dayNum}</div>
                       <div className="cal-cell-status">
                         <span style={{ color: '#94a3b8' }}>Inactivo</span>
@@ -452,7 +452,7 @@ export default function PublicBooking() {
                   );
                 }
 
-                // Días activos: sincronizados con el semáforo del barbero
+                // Días activos: idénticos al panel del barbero
                 const statusInfo = dayStatusMap[d.dateStr];
                 const status = statusInfo?.status || 'green';
                 const statusText = statusInfo?.statusText || 'Disponible ●';
@@ -469,6 +469,7 @@ export default function PublicBooking() {
                     key={index}
                     onClick={() => handleDaySelect(d)}
                     className={`cal-cell ${badgeClass} ${isSelected ? 'cell-selected' : ''}`}
+                    style={{ minHeight: 64, textAlign: 'center' }}
                   >
                     <div className="cal-cell-num">{d.dayNum}</div>
                     <div className="cal-cell-status">
