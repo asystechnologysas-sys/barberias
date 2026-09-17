@@ -81,9 +81,7 @@ app.get('/api/public/:slug', asyncRoute(async (req, res) => {
   res.json({ success: true, data: org });
 }));
 
-
-
-// DISPONIBILIDAD REAL BASADA EN LOS HORARIOS CONFIGURADOS POR EL BARBERO
+// DISPONIBILIDAD REAL BASADA EN LOS HORARIOS CONFIGURADOS Y SEMÁFORO SINCRONIZADO
 app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
   const dateStr = String(req.query.date);
   const org = await db.organization.findUnique({ where: { slug: String(req.params.slug) } });
@@ -104,7 +102,17 @@ app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
   });
 
   if (fullDayBlock) {
-    return res.json({ success: true, data: [], isClosed: true });
+    return res.json({
+      success: true,
+      data: {
+        slots: [],
+        isClosed: true,
+        status: 'closed',
+        statusText: 'Cerrado',
+        freeSlotsCount: 0,
+        totalSlots: 0
+      }
+    });
   }
 
   // 2. Obtener el horario configurado para este día de la semana
@@ -120,11 +128,21 @@ app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
 
   // Si el barbero marcó este día como no laborable por defecto
   if (schedule?.closed) {
-    return res.json({ success: true, data: [], isClosed: true });
+    return res.json({
+      success: true,
+      data: {
+        slots: [],
+        isClosed: true,
+        status: 'closed',
+        statusText: 'Cerrado',
+        freeSlotsCount: 0,
+        totalSlots: 0
+      }
+    });
   }
 
   const openTime = schedule?.openTime || '09:00';
-  const closeTime = schedule?.closeTime || '20:00'; // Soporta hasta las 8pm para permitir turnos de 7pm
+  const closeTime = schedule?.closeTime || '20:00';
   const breakStart = schedule?.breakStart;
   const breakEnd = schedule?.breakEnd;
 
@@ -156,20 +174,20 @@ app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
 
   const durationMin = service?.durationMinutes || 45;
 
-  // Generación dinámica de franjas horarias
   const [openH, openM] = openTime.split(':').map(Number);
   const [closeH, closeM] = closeTime.split(':').map(Number);
   const openMinutesTotal = openH * 60 + openM;
   const closeMinutesTotal = closeH * 60 + closeM;
 
   const freeSlots: { time: string }[] = [];
+  let totalWorkingSlotsCount = 0;
 
   for (let m = openMinutesTotal; m + durationMin <= closeMinutesTotal; m += durationMin) {
     const slotH = Math.floor(m / 60).toString().padStart(2, '0');
     const slotM = (m % 60).toString().padStart(2, '0');
     const slotTime = `${slotH}:${slotM}`;
 
-    // Verificar si cae en hora de almuerzo / descanso
+    // Descartar si cae dentro de almuerzo
     let inBreak = false;
     if (breakStart && breakEnd) {
       const [bsH, bsM] = breakStart.split(':').map(Number);
@@ -181,25 +199,54 @@ app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
       }
     }
 
-    const isBooked = appointments.some(a => toBogotaHour(a.startsAt) === slotTime);
-    const isBlocked = blocks.some(b => toBogotaHour(b.startsAt) === slotTime);
+    if (!inBreak) {
+      totalWorkingSlotsCount++;
 
-    // Verificar si está ocupado por un VIP (a menos que tenga excepción de cambio)
-    const isVipLocked = vips.some(v => {
-      if (v.time !== slotTime) return false;
-      const isSkippedThisDay = v.exceptions?.some(e => {
-        const exDate = new Date(e.date).toISOString().split('T')[0];
-        return exDate === dateStr;
+      const isBooked = appointments.some(a => toBogotaHour(a.startsAt) === slotTime);
+      const isBlocked = blocks.some(b => toBogotaHour(b.startsAt) === slotTime);
+
+      const isVipLocked = vips.some(v => {
+        if (v.time !== slotTime) return false;
+        const isSkippedThisDay = v.exceptions?.some(e => {
+          const exDate = new Date(e.date).toISOString().split('T')[0];
+          return exDate === dateStr;
+        });
+        return !isSkippedThisDay;
       });
-      return !isSkippedThisDay;
-    });
 
-    if (!inBreak && !isBooked && !isBlocked && !isVipLocked) {
-      freeSlots.push({ time: slotTime });
+      if (!isBooked && !isBlocked && !isVipLocked) {
+        freeSlots.push({ time: slotTime });
+      }
     }
   }
 
-  res.json({ success: true, data: freeSlots, isClosed: false });
+  // Semáforo idéntico al cálculo del panel del barbero
+  const freeSlotsCount = freeSlots.length;
+  let status = 'green';
+  let statusText = `${freeSlotsCount} libres ●`;
+
+  if (totalWorkingSlotsCount === 0 || freeSlotsCount === 0) {
+    status = 'red';
+    statusText = 'Lleno ●';
+  } else if (freeSlotsCount <= 2 || (freeSlotsCount / totalWorkingSlotsCount) <= 0.5) {
+    status = 'yellow';
+    statusText = `${freeSlotsCount} libres ●`;
+  } else {
+    status = 'green';
+    statusText = `${freeSlotsCount} libres ●`;
+  }
+
+  res.json({
+    success: true,
+    data: {
+      slots: freeSlots,
+      isClosed: false,
+      status,
+      statusText,
+      freeSlotsCount,
+      totalSlots: totalWorkingSlotsCount
+    }
+  });
 }));
 
 // 2. AUTHENTICATION
@@ -311,7 +358,7 @@ app.get('/api/schedules', auth, activeTenant, asyncRoute(async (req, res) => {
 }));
 
 app.put('/api/schedules', auth, activeTenant, asyncRoute(async (req, res) => {
-  const { schedules } = req.body; // Array de los 7 días
+  const { schedules } = req.body;
   const orgId = req.auth!.organizationId!;
   const barber = await db.barber.findFirst({ where: { organizationId: orgId } });
 
@@ -600,7 +647,6 @@ app.post('/api/vip', auth, activeTenant, asyncRoute(async (req, res) => {
   const barber = await db.barber.findFirst({ where: { organizationId: req.auth!.organizationId! } });
   if (!barber) return fail(res, 404, 'BARBER_NOT_FOUND', 'Barbero no encontrado.');
 
-  // VALIDACIÓN: Verificar si ya existe otro VIP en ese mismo día y hora
   const existingVip = await db.vipSchedule.findFirst({
     where: {
       organizationId: req.auth!.organizationId!,

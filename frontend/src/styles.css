@@ -1378,3 +1378,19 @@ h1, h2, h3, b, .font-sora {
   gap: 16px;
   align-items: center;
 }
+
+/* Sincronización exacta de texto del semáforo */
+.cal-cell.status-yellow span {
+  color: #ca8a04 !important;
+  font-weight: 700;
+}
+
+.cal-cell.status-green span {
+  color: #16a34a !important;
+  font-weight: 700;
+}
+
+.cal-cell.status-red span {
+  color: #dc2626 !important;
+  font-weight: 800;
+}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { X, CheckCircle2, LogOut, Crown, AlertCircle, RefreshCw, Sparkles, Calendar as CalIcon } from 'lucide-react';
 import { api } from '../api';
@@ -19,13 +19,15 @@ export default function PublicBooking() {
   const [freeHours, setFreeHours] = useState<string[]>([]);
   const [loadingHours, setLoadingHours] = useState(false);
 
-  // Mapa de estado real de cada día de los 7 activos: { "2026-09-21": { isFull: true, isClosed: false } }
-  const [dayStatusMap, setDayStatusMap] = useState<{ [dateStr: string]: { isFull: boolean; isClosed: boolean } }>({});
+  // Mapa de estado real idéntico al barbero: { "2026-09-21": { status: 'red' | 'yellow' | 'green' | 'closed', statusText: 'Lleno ●', isFull: true, isClosed: false } }
+  const [dayStatusMap, setDayStatusMap] = useState<{
+    [dateStr: string]: { status: string; statusText: string; isFull: boolean; isClosed: boolean; freeCount: number };
+  }>({});
 
   // Citas futuras del cliente
   const [myUpcomingAppointments, setMyUpcomingAppointments] = useState<any[]>([]);
 
-  // Modo reprogramación VIP sobre el almanaque
+  // Modo reprogramación VIP
   const [isReschedulingVip, setIsReschedulingVip] = useState(false);
   const [myVipData, setMyVipData] = useState<any>(null);
 
@@ -36,7 +38,6 @@ export default function PublicBooking() {
   const userStr = localStorage.getItem('asys_user');
   const currentUser = userStr ? JSON.parse(userStr) : null;
 
-  // Incluye la hora 13:00 (1:00 PM)
   const masterDayHours = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
   const weekdayNames = ['Domingos', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábados'];
 
@@ -44,18 +45,16 @@ export default function PublicBooking() {
     setAlertModal({ open: true, title, message, type });
   };
 
-  useEffect(() => {
-    // 1. Cargar datos de la barbería
+  const loadOrgData = useCallback(() => {
     api.get(`/api/public/${slug}`)
       .then(data => {
         setOrg(data);
-        if (data.services?.length) setSelectedService(data.services[0]);
-        if (data.barbers?.length) setSelectedBarber(data.barbers[0].id);
+        if (data.services?.length && !selectedService) setSelectedService(data.services[0]);
+        if (data.barbers?.length && !selectedBarber) setSelectedBarber(data.barbers[0].id);
         setLoading(false);
       })
       .catch(() => setLoading(false));
 
-    // 2. Si está autenticado, cargar su horario VIP real y sus citas futuras
     if (token) {
       api.get('/api/vip/my-schedule')
         .then(vip => setMyVipData(vip))
@@ -71,11 +70,15 @@ export default function PublicBooking() {
     }
   }, [slug, token]);
 
-  // CÁLCULO DEL MES CON ALINEACIÓN DOMINGO A SÁBADO
+  useEffect(() => {
+    loadOrgData();
+  }, [loadOrgData]);
+
+  // CALENDARIO DOMINGO A SÁBADO
   const today = new Date();
   const year = today.getFullYear();
   const month = today.getMonth();
-  const firstDayIndex = new Date(year, month, 1).getDay(); // 0: Dom, 1: Lun...
+  const firstDayIndex = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
   const emptyPaddingDays = Array.from({ length: firstDayIndex }, (_, i) => i);
@@ -84,8 +87,6 @@ export default function PublicBooking() {
     const d = new Date(year, month, i + 1);
     const dateStr = d.toISOString().split('T')[0];
     const diffDays = Math.floor((d.getTime() - new Date(today.toDateString()).getTime()) / (1000 * 60 * 60 * 24));
-    
-    // Solo son activos los días entre hoy y los próximos 7 días
     const inRange = diffDays >= 0 && diffDays <= 7;
 
     return {
@@ -95,34 +96,63 @@ export default function PublicBooking() {
     };
   });
 
-  // CONSULTA REAL DE DISPONIBILIDAD PARA PINTAR DE ROJO SOLO LOS DÍAS VERDADERAMENTE LLENOS O CERRADOS
-  useEffect(() => {
+  // CONSULTA Y CÁLCULO DE DISPONIBILIDAD IDÉNTICO AL PANEL DEL BARBERO
+  const refreshAvailability = useCallback(async () => {
     if (!org) return;
+    const activeDays = currentMonthDays.filter(d => d.inRange);
+    const newStatusMap: {
+      [key: string]: { status: string; statusText: string; isFull: boolean; isClosed: boolean; freeCount: number };
+    } = {};
 
-    const checkActiveDays = async () => {
-      const activeDays = currentMonthDays.filter(d => d.inRange);
-      const newStatusMap: { [key: string]: { isFull: boolean; isClosed: boolean } } = {};
+    await Promise.all(
+      activeDays.map(async (d) => {
+        try {
+          const res = await api.get(`/api/public/${slug}/availability?date=${d.dateStr}`);
+          
+          if (res && typeof res === 'object' && !Array.isArray(res)) {
+            const slots = res.slots || [];
+            const isClosed = !!res.isClosed;
+            const freeCount = typeof res.freeSlotsCount === 'number' ? res.freeSlotsCount : slots.length;
+            const status = res.status || (isClosed ? 'closed' : freeCount === 0 ? 'full' : 'green');
+            const statusText = res.statusText || (isClosed ? 'Cerrado' : freeCount === 0 ? 'Lleno ●' : `${freeCount} libres ●`);
 
-      await Promise.all(
-        activeDays.map(async (d) => {
-          try {
-            const res = await api.get(`/api/public/${slug}/availability?date=${d.dateStr}`);
-            const slots = Array.isArray(res) ? res : (res?.data || []);
-            const isClosed = !!res?.isClosed;
-            const isFull = isClosed || slots.length === 0;
-
-            newStatusMap[d.dateStr] = { isFull, isClosed };
-          } catch {
-            newStatusMap[d.dateStr] = { isFull: false, isClosed: false };
+            newStatusMap[d.dateStr] = {
+              status,
+              statusText,
+              isFull: status === 'full' || freeCount === 0,
+              isClosed,
+              freeCount
+            };
+          } else {
+            const slots = Array.isArray(res) ? res : [];
+            const freeCount = slots.length;
+            const isFull = freeCount === 0;
+            newStatusMap[d.dateStr] = {
+              status: isFull ? 'full' : 'green',
+              statusText: isFull ? 'Lleno ●' : `${freeCount} libres ●`,
+              isFull,
+              isClosed: false,
+              freeCount
+            };
           }
-        })
-      );
+        } catch {
+          newStatusMap[d.dateStr] = {
+            status: 'green',
+            statusText: 'Disponible ●',
+            isFull: false,
+            isClosed: false,
+            freeCount: 10
+          };
+        }
+      })
+    );
 
-      setDayStatusMap(newStatusMap);
-    };
+    setDayStatusMap(newStatusMap);
+  }, [org, slug]);
 
-    checkActiveDays();
-  }, [org]);
+  useEffect(() => {
+    refreshAvailability();
+  }, [refreshAvailability]);
 
   const normalizeHour = (rawTime: string) => {
     if (!rawTime) return '';
@@ -137,6 +167,17 @@ export default function PublicBooking() {
 
   const handleDaySelect = async (day: any) => {
     if (!day.inRange) return;
+
+    const dayInfo = dayStatusMap[day.dateStr];
+    if (dayInfo?.isClosed) {
+      showAlert('Día Cerrado', 'Este día la barbería se encuentra cerrada.', 'info');
+      return;
+    }
+    if (dayInfo?.isFull) {
+      showAlert('Día Completo', 'No quedan cupos disponibles para esta fecha. Por favor selecciona otro día.', 'info');
+      return;
+    }
+
     setSelectedDate(day.dateStr);
     setSelectedTime('');
     setLoadingHours(true);
@@ -144,12 +185,12 @@ export default function PublicBooking() {
 
     try {
       const res = await api.get(`/api/public/${slug}/availability?date=${day.dateStr}&barberId=${selectedBarber || ''}`);
-      const slots = Array.isArray(res) ? res : (res?.data || []);
-      
-      if (res.isClosed || slots.length === 0) {
+      const rawSlots = res?.slots || (Array.isArray(res) ? res : (res?.data || []));
+
+      if (res?.isClosed || rawSlots.length === 0) {
         setFreeHours([]);
       } else {
-        const parsed = slots.map((item: any) => normalizeHour(item.time));
+        const parsed = rawSlots.map((item: any) => normalizeHour(item.time));
         setFreeHours(parsed);
       }
     } catch {
@@ -190,6 +231,8 @@ export default function PublicBooking() {
           `Tu turno habitual del ${weekdayNames[myVipData.weekday]} ha sido liberado para esta semana. Tu nuevo turno es el ${selectedDate} a las ${selectedTime}.`,
           'success'
         );
+        refreshAvailability();
+        loadOrgData();
       } catch (err: any) {
         showAlert('Error al reprogramar', err.message || 'No se pudo mover el turno VIP', 'error');
       }
@@ -202,6 +245,8 @@ export default function PublicBooking() {
           startsAt
         });
         showAlert('¡Cita Confirmada!', `Tu turno quedó reservado para el ${selectedDate} a las ${selectedTime}.`, 'success');
+        refreshAvailability();
+        loadOrgData();
       } catch (err: any) {
         showAlert('No se pudo agendar', err.message || 'Error al confirmar la cita', 'error');
       }
@@ -212,6 +257,8 @@ export default function PublicBooking() {
     try {
       await api.patch(`/api/appointments/${id}/cancel`, {});
       showAlert('Cita Cancelada', 'Tu cita ha sido cancelada exitosamente.', 'success');
+      refreshAvailability();
+      loadOrgData();
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo cancelar', 'error');
     }
@@ -374,7 +421,9 @@ export default function PublicBooking() {
             <div className="cal-header-bar">
               <div>
                 <span className="cal-eyebrow">{isReschedulingVip ? 'REPROGRAMAR TURNO VIP' : 'AGENDA ONLINE'}</span>
-                <h2 className="cal-month-title">Septiembre 2026</h2>
+                <h2 className="cal-month-title">
+                  {today.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })}
+                </h2>
               </div>
               <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Próximos 7 días hábiles</span>
             </div>
@@ -384,16 +433,14 @@ export default function PublicBooking() {
             </div>
 
             <div className="cal-days-grid">
-              {/* Celdas vacías al inicio */}
               {emptyPaddingDays.map((_, i) => (
                 <div key={`empty-${i}`} className="cal-cell cell-disabled" style={{ opacity: 0.15 }}></div>
               ))}
 
-              {/* RENDERIZADO ESTRICTO DE CADA DÍA */}
               {currentMonthDays.map((d, index) => {
                 const isSelected = selectedDate === d.dateStr;
 
-                // 1. REGLA CLAVE: Si está fuera de los 7 días (pasados o futuros lejanos), SIEMPRE GRIS E INACTIVO
+                // Fuera del rango de 7 días: inactivo
                 if (!d.inRange) {
                   return (
                     <div key={index} className="cal-cell cell-disabled">
@@ -405,53 +452,27 @@ export default function PublicBooking() {
                   );
                 }
 
-                // 2. Para los 7 días activos, verificar si la base de datos dice que está lleno o cerrado
+                // Días activos: sincronizados con el semáforo del barbero
                 const statusInfo = dayStatusMap[d.dateStr];
-                const isClosed = statusInfo?.isClosed;
-                const isFull = statusInfo?.isFull;
+                const status = statusInfo?.status || 'green';
+                const statusText = statusInfo?.statusText || 'Disponible ●';
 
-                // SI ESTÁ CERRADO POR EL BARBERO: ROJO CON TEXTO "Cerrado"
-                if (isClosed) {
-                  return (
-                    <div
-                      key={index}
-                      onClick={() => handleDaySelect(d)}
-                      className={`cal-cell status-red ${isSelected ? 'cell-selected' : ''}`}
-                    >
-                      <div className="cal-cell-num">{d.dayNum}</div>
-                      <div className="cal-cell-status">
-                        <span>Cerrado</span>
-                      </div>
-                    </div>
-                  );
+                let badgeClass = 'status-green';
+                if (status === 'closed' || status === 'red' || status === 'full') {
+                  badgeClass = 'status-red';
+                } else if (status === 'yellow') {
+                  badgeClass = 'status-yellow';
                 }
 
-                // SI ESTÁ LLENO POR CITAS: ROJO CON TEXTO "Lleno ●"
-                if (isFull) {
-                  return (
-                    <div
-                      key={index}
-                      onClick={() => handleDaySelect(d)}
-                      className={`cal-cell status-red ${isSelected ? 'cell-selected' : ''}`}
-                    >
-                      <div className="cal-cell-num">{d.dayNum}</div>
-                      <div className="cal-cell-status">
-                        <span>Lleno ●</span>
-                      </div>
-                    </div>
-                  );
-                }
-
-                // SI TIENE HORAS LIBRES: VERDE CON TEXTO "● Libre"
                 return (
                   <div
                     key={index}
                     onClick={() => handleDaySelect(d)}
-                    className={`cal-cell status-green ${isSelected ? 'cell-selected' : ''}`}
+                    className={`cal-cell ${badgeClass} ${isSelected ? 'cell-selected' : ''}`}
                   >
                     <div className="cal-cell-num">{d.dayNum}</div>
                     <div className="cal-cell-status">
-                      <span>● Libre</span>
+                      <span>{statusText}</span>
                     </div>
                   </div>
                 );
@@ -571,7 +592,6 @@ export default function PublicBooking() {
             <button
               onClick={() => {
                 setAlertModal(null);
-                if (alertModal.type === 'success') window.location.reload();
               }}
               className="btn-clean-submit"
             >
