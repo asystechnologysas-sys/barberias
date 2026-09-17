@@ -8,7 +8,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import path from 'path';
 import fs from 'fs';
-import multer from 'multer';
+import multer, { FileFilterCallback } from 'multer';
 import { PrismaClient, Role, AppointmentStatus, OrganizationStatus, VipExceptionType, VipFrequency } from '@prisma/client';
 import { z } from 'zod';
 
@@ -25,8 +25,10 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 }
 
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
-  filename: (_req, file, cb) => {
+  destination: (_req: Request, _file: Express.Multer.File, cb: (error: Error | null, destination: string) => void) => {
+    cb(null, UPLOADS_DIR);
+  },
+  filename: (_req: Request, file: Express.Multer.File, cb: (error: Error | null, filename: string) => void) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const uniqueName = `logo-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
     cb(null, uniqueName);
@@ -36,7 +38,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
+  fileFilter: (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
@@ -54,7 +56,13 @@ app.use(rateLimit({ windowMs: 15 * 60_000, max: 1000, standardHeaders: true, leg
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 type Auth = { id: string; role: Role; organizationId: string | null };
-declare global { namespace Express { interface Request { auth?: Auth } } }
+declare global {
+  namespace Express {
+    interface Request {
+      auth?: Auth;
+    }
+  }
+}
 
 const fail = (res: Response, status: number, code: string, message: string) => res.status(status).json({ success: false, error: { code, message } });
 const asyncRoute = (fn: (r: Request, s: Response, n: NextFunction) => Promise<unknown>) => (r: Request, s: Response, n: NextFunction) => void fn(r, s, n).catch(n);
@@ -94,7 +102,6 @@ const toBogotaHour = (date: Date) => {
   return date.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
-// Disparador genérico a n8n
 async function triggerN8N(payload: any) {
   if (!N8N_WEBHOOK_URL) return;
   try {
@@ -323,14 +330,12 @@ app.post('/api/auth/send-otp', asyncRoute(async (req, res) => {
   if (!org) return fail(res, 404, 'ORGANIZATION_NOT_FOUND', 'Barbería no encontrada.');
 
   let cleanPhone = v.phone.replace(/[^0-9]/g, '');
-  if (cleanPhone.length === 10) cleanPhone = `57${cleanPhone}`; // Formato internacional Colombia
+  if (cleanPhone.length === 10) cleanPhone = `57${cleanPhone}`;
 
-  // Generar código de 6 dígitos numéricos
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   const codeHash = await bcrypt.hash(code, 8);
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-  // Guardar en la tabla Otp
   await db.otp.create({
     data: {
       organizationId: org.id,
@@ -340,7 +345,6 @@ app.post('/api/auth/send-otp', asyncRoute(async (req, res) => {
     }
   });
 
-  // Disparar a n8n para envío por WhatsApp
   triggerN8N({
     tipo: 'OTP',
     phone: cleanPhone,
@@ -448,7 +452,7 @@ app.post('/api/auth/register', asyncRoute(async (req, res) => {
     name: z.string().min(2),
     phone: z.string().min(7),
     password: z.string().min(4),
-    code: z.string().min(4) // Código de WhatsApp obligatorio
+    code: z.string().min(4)
   }).parse(req.body);
 
   const org = await db.organization.findUnique({ where: { slug: v.slug } });
@@ -457,7 +461,6 @@ app.post('/api/auth/register', asyncRoute(async (req, res) => {
   let cleanPhone = v.phone.replace(/[^0-9]/g, '');
   if (cleanPhone.length === 10) cleanPhone = `57${cleanPhone}`;
 
-  // 1. VALIDAR CÓDIGO OTP
   const latestOtp = await db.otp.findFirst({
     where: {
       organizationId: org.id,
@@ -472,7 +475,6 @@ app.post('/api/auth/register', asyncRoute(async (req, res) => {
     return fail(res, 400, 'INVALID_OTP', 'El código de WhatsApp es incorrecto o ha vencido. Solicita uno nuevo.');
   }
 
-  // Marcar OTP usado
   await db.otp.update({
     where: { id: latestOtp.id },
     data: { usedAt: new Date() }
@@ -678,7 +680,7 @@ app.patch('/api/services/:id', auth, activeTenant, asyncRoute(async (req, res) =
   res.json({ success: true, data: updated });
 }));
 
-// 5. CITAS (CON DISPARADOR DE NOTIFICACIÓN ELEGANTE A N8N)
+// 5. CITAS (CON DISPARADOR A N8N)
 app.post('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) => {
   try {
     const v = z.object({
@@ -809,7 +811,6 @@ app.post('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) =>
       include: { barber: true }
     });
 
-    // Disparar WhatsApp a n8n con el mensaje de cita agendada
     triggerN8N({
       tipo: 'APPOINTMENT_CONFIRMED',
       tenantName: org?.name || 'ASYS Barber',
@@ -1079,10 +1080,11 @@ app.post('/api/vip/reschedule-week', auth, activeTenant, asyncRoute(async (req, 
   res.json({ success: true, data: newAppointment });
 }));
 
-// 8. SUPERADMIN
+// 8. SUPERADMIN: GESTIÓN MULTI-TENANT, SUBIDA DE ARCHIVOS Y BARBEROS
 app.post('/api/superadmin/upload', auth, role(Role.SUPERADMIN), upload.single('logo'), (req: Request, res: Response) => {
-  if (!req.file) return fail(res, 400, 'NO_FILE', 'No se ha subido ningún archivo.');
-  const fileUrl = `/uploads/${req.file.filename}`;
+  const reqWithFile = req as Request & { file?: Express.Multer.File };
+  if (!reqWithFile.file) return fail(res, 400, 'NO_FILE', 'No se ha subido ningún archivo.');
+  const fileUrl = `/uploads/${reqWithFile.file.filename}`;
   res.json({ success: true, data: { url: fileUrl } });
 });
 
