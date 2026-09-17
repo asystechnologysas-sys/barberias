@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Building2, Plus, ExternalLink, LogOut, CheckCircle2, PauseCircle,
   PlayCircle, Users, Scissors, CalendarCheck2, ShieldAlert, Sparkles,
-  Edit2, Trash2, X, RefreshCw
+  Edit2, Trash2, X, RefreshCw, UserPlus, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -24,15 +24,25 @@ export default function SuperAdmin() {
   // Modales
   const [createModal, setCreateModal] = useState(false);
   const [editModal, setEditModal] = useState<{ open: boolean; org: any | null }>({ open: false, org: null });
+  const [barbersModal, setBarbersModal] = useState<{ open: boolean; org: any | null }>({ open: false, org: null });
 
-  // Form states
+  // Form states creación
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
   const [maxBarbers, setMaxBarbers] = useState(5);
-  const [submitting, setSubmitting] = useState(false);
+  
+  // Lista inicial de barberos en modal de creación
+  const [barberList, setBarberList] = useState<{ name: string; phone: string; priority: number }[]>([
+    { name: '', phone: '', priority: 1 }
+  ]);
 
-  // Modal de notificación ASYS
+  // Form agregar barbero a barbería existente
+  const [newBName, setNewBName] = useState('');
+  const [newBPhone, setNewBPhone] = useState('');
+  const [newBPriority, setNewBPriority] = useState(1);
+
+  const [submitting, setSubmitting] = useState(false);
   const [alertModal, setAlertModal] = useState<{ open: boolean; title: string; message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const showAlert = (title: string, message: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -50,7 +60,7 @@ export default function SuperAdmin() {
       setOrgs(o || []);
     } catch (err: any) {
       console.error(err);
-      showAlert('Error al cargar', err.message || 'No se pudieron obtener las organizaciones', 'error');
+      showAlert('Error', err.message || 'No se pudieron cargar los datos', 'error');
     } finally {
       setLoading(false);
     }
@@ -65,19 +75,24 @@ export default function SuperAdmin() {
     const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
     if (!name || !cleanSlug) return showAlert('Datos Incompletos', 'Nombre y slug son obligatorios', 'info');
 
+    // Filtrar barberos válidos
+    const validBarbers = barberList.filter(b => b.name.trim() && b.phone.trim());
+
     setSubmitting(true);
     try {
       await api.post('/api/superadmin/organizations', {
         name,
         slug: cleanSlug,
         logoUrl: logoUrl.trim() || undefined,
-        maxBarbers: Number(maxBarbers) || 5
+        maxBarbers: Number(maxBarbers) || 5,
+        barbers: validBarbers
       });
       setCreateModal(false);
       setName('');
       setSlug('');
       setLogoUrl('');
-      showAlert('¡Barbería Creada!', `La barbería ${name} fue registrada con éxito en el sistema.`);
+      setBarberList([{ name: '', phone: '', priority: 1 }]);
+      showAlert('¡Barbería Creada!', `La barbería ${name} fue registrada con ${validBarbers.length} barbero(s) autorizados.`);
       loadData();
     } catch (err: any) {
       showAlert('Error al crear', err.message || 'No se pudo crear la barbería', 'error');
@@ -86,24 +101,39 @@ export default function SuperAdmin() {
     }
   };
 
-  const handleUpdate = async (e: React.FormEvent) => {
+  const handleAddBarberToOrg = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editModal.org) return;
+    if (!barbersModal.org || !newBName || !newBPhone) return;
 
     setSubmitting(true);
     try {
-      await api.patch(`/api/superadmin/organizations/${editModal.org.id}`, {
-        name: editModal.org.name,
-        logoUrl: editModal.org.logoUrl || null,
-        maxBarbers: Number(editModal.org.maxBarbers) || 5
+      await api.post(`/api/superadmin/organizations/${barbersModal.org.id}/barbers`, {
+        name: newBName,
+        phone: newBPhone,
+        priority: Number(newBPriority)
       });
-      setEditModal({ open: false, org: null });
-      showAlert('Barbería Actualizada', 'Los datos de la barbería se actualizaron correctamente.');
+      setNewBName('');
+      setNewBPhone('');
+      showAlert('Barbero Autorizado', `${newBName} ya puede ingresar a la barbería.`);
       loadData();
+      // Recargar modal actual
+      const updatedOrg = orgs.find(o => o.id === barbersModal.org.id);
+      if (updatedOrg) setBarbersModal({ open: true, org: updatedOrg });
     } catch (err: any) {
-      showAlert('Error al actualizar', err.message || 'No se pudo actualizar', 'error');
+      showAlert('Error', err.message || 'No se pudo autorizar al barbero', 'error');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleRemoveAllowedBarber = async (allowedId: string) => {
+    if (!barbersModal.org) return;
+    try {
+      await api.delete(`/api/superadmin/organizations/${barbersModal.org.id}/barbers/${allowedId}`);
+      showAlert('Barbero Removido', 'El número ya no tiene acceso de barbero.');
+      loadData();
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo eliminar', 'error');
     }
   };
 
@@ -114,8 +144,8 @@ export default function SuperAdmin() {
       showAlert(
         nextStatus === 'ACTIVE' ? 'Suscripción Activada' : 'Suscripción Pausada',
         nextStatus === 'ACTIVE'
-          ? `La barbería ${org.name} ya está disponible para agendamientos.`
-          : `La barbería ${org.name} ha sido pausada y no permitirá agendar turnos.`
+          ? `La barbería ${org.name} ya está disponible nuevamente.`
+          : `La barbería ${org.name} quedó pausada. Clientes y barberos verán el aviso de suspensión.`
       );
       loadData();
     } catch (err: any) {
@@ -133,7 +163,7 @@ export default function SuperAdmin() {
   return (
     <div className="admin-page-wrap">
 
-      {/* HEADER SUPERADMIN ASYS */}
+      {/* HEADER SUPERADMIN */}
       <header className="client-top-bar">
         <div className="client-brand-area">
           <div className="barber-logo-placeholder" style={{ background: '#eff6ff', color: '#1554ff' }}>
@@ -152,16 +182,16 @@ export default function SuperAdmin() {
         </button>
       </header>
 
-      {/* CONTENEDOR PRINCIPAL */}
+      {/* CONTENEDOR */}
       <div style={{ maxWidth: 1280, margin: '28px auto 0', padding: '0 20px' }}>
 
-        {/* TÍTULO Y BOTÓN DE ACCIÓN */}
+        {/* TÍTULO Y BOTÓN REGISTRAR */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
           <div>
             <span className="cal-eyebrow">ADMINISTRADOR GLOBAL</span>
-            <h1 style={{ fontFamily: 'Sora', fontSize: 26, color: '#0b1020', marginTop: 2 }}>Control de Barberías</h1>
+            <h1 style={{ fontFamily: 'Sora', fontSize: 26, color: '#0b1020', marginTop: 2 }}>Control de Barberías y Suscripciones</h1>
             <p style={{ color: '#64748b', fontSize: 13, marginTop: 2 }}>
-              Administra todas las barberías suscritas, su estado de servicio y sus enlaces únicos de clientes.
+              Configura barberías, asigna números de WhatsApp de barberos con jerarquía de agendamiento y controla accesos.
             </p>
           </div>
           <button onClick={() => setCreateModal(true)} className="btn-clean-submit" style={{ width: 'auto', padding: '10px 22px' }}>
@@ -169,12 +199,12 @@ export default function SuperAdmin() {
           </button>
         </div>
 
-        {/* TARJETAS DE MÉTRICAS GLOBALES */}
+        {/* MÉTRICAS */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 28 }}>
           
           <div className="client-summary-card" style={{ padding: '18px 20px' }}>
             <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Building2 size={15} color="#1554ff" /> Total Barberías
+              <Building2 size={15} color="#1554ff" /> Barberías Totales
             </span>
             <b style={{ fontSize: 28, fontFamily: 'Sora', color: '#0b1020', display: 'block', marginTop: 8 }}>
               {stats.totalOrganizations}
@@ -183,7 +213,7 @@ export default function SuperAdmin() {
 
           <div className="client-summary-card" style={{ padding: '18px 20px' }}>
             <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <CheckCircle2 size={15} color="#16a34a" /> Activas
+              <CheckCircle2 size={15} color="#16a34a" /> Suscripciones Activas
             </span>
             <b style={{ fontSize: 28, fontFamily: 'Sora', color: '#16a34a', display: 'block', marginTop: 8 }}>
               {stats.active}
@@ -192,7 +222,7 @@ export default function SuperAdmin() {
 
           <div className="client-summary-card" style={{ padding: '18px 20px' }}>
             <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <PauseCircle size={15} color="#dc2626" /> Pausadas
+              <PauseCircle size={15} color="#dc2626" /> Pausadas / Vencidas
             </span>
             <b style={{ fontSize: 28, fontFamily: 'Sora', color: '#dc2626', display: 'block', marginTop: 8 }}>
               {stats.suspended}
@@ -201,7 +231,7 @@ export default function SuperAdmin() {
 
           <div className="client-summary-card" style={{ padding: '18px 20px' }}>
             <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Scissors size={15} color="#0284c7" /> Barberos Registrados
+              <Scissors size={15} color="#0284c7" /> Barberos Activos
             </span>
             <b style={{ fontSize: 28, fontFamily: 'Sora', color: '#0284c7', display: 'block', marginTop: 8 }}>
               {stats.totalBarbers}
@@ -210,7 +240,7 @@ export default function SuperAdmin() {
 
           <div className="client-summary-card" style={{ padding: '18px 20px' }}>
             <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <CalendarCheck2 size={15} color="#1554ff" /> Total Citas
+              <CalendarCheck2 size={15} color="#1554ff" /> Citas Registradas
             </span>
             <b style={{ fontSize: 28, fontFamily: 'Sora', color: '#1554ff', display: 'block', marginTop: 8 }}>
               {stats.totalAppointments}
@@ -219,7 +249,7 @@ export default function SuperAdmin() {
 
           <div className="client-summary-card" style={{ padding: '18px 20px' }}>
             <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Users size={15} color="#7c3aed" /> Clientes
+              <Users size={15} color="#7c3aed" /> Clientes Totales
             </span>
             <b style={{ fontSize: 28, fontFamily: 'Sora', color: '#7c3aed', display: 'block', marginTop: 8 }}>
               {stats.totalClients || 0}
@@ -228,11 +258,11 @@ export default function SuperAdmin() {
 
         </div>
 
-        {/* TABLA SAAS DE BARBERÍAS */}
+        {/* TABLA PRINCIPAL DE BARBERÍAS */}
         <div className="table-card-saas">
           <div className="table-saas-header">
             <div>
-              <span className="cal-eyebrow">DIRECTORIO DE CLIENTES SAAS</span>
+              <span className="cal-eyebrow">PORTAFOLIO DE NEGOCIOS</span>
               <h2 style={{ fontFamily: 'Sora', fontSize: 20, marginTop: 2 }}>Barberías Suscritas</h2>
             </div>
             <button onClick={loadData} className="btn-logout-modern" style={{ padding: '6px 14px' }}>
@@ -245,24 +275,25 @@ export default function SuperAdmin() {
               <thead>
                 <tr>
                   <th>Barbería</th>
-                  <th>Link Público Cliente</th>
-                  <th>Barberos</th>
+                  <th>Enlace Público</th>
+                  <th>Barberos Autorizados</th>
                   <th>Citas</th>
-                  <th>Clientes</th>
                   <th>Estado</th>
-                  <th style={{ textAlign: 'right' }}>Acciones</th>
+                  <th style={{ textAlign: 'right' }}>Gestión</th>
                 </tr>
               </thead>
               <tbody>
                 {orgs.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: 36, color: '#64748b' }}>
+                    <td colSpan={6} style={{ textAlign: 'center', padding: 36, color: '#64748b' }}>
                       {loading ? 'Cargando barberías...' : 'No hay barberías registradas.'}
                     </td>
                   </tr>
                 ) : (
                   orgs.map((o) => {
                     const isActive = o.status === 'ACTIVE';
+                    const allowedCount = o.allowedBarbers?.length || o._count?.barbers || 0;
+
                     return (
                       <tr key={o.id}>
                         <td>
@@ -271,17 +302,17 @@ export default function SuperAdmin() {
                               <img
                                 src={o.logoUrl}
                                 alt={o.name}
-                                style={{ width: 40, height: 40, borderRadius: '50%', objectFit: 'cover', border: '1.5px solid #e2e8f0' }}
+                                style={{ width: 42, height: 42, borderRadius: '50%', objectFit: 'cover', border: '1.5px solid #e2e8f0' }}
                                 onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
                               />
                             ) : (
-                              <div className="client-avatar-circle" style={{ width: 40, height: 40, fontSize: 14 }}>
+                              <div className="client-avatar-circle" style={{ width: 42, height: 42, fontSize: 14 }}>
                                 {o.name.slice(0, 2).toUpperCase()}
                               </div>
                             )}
                             <div>
                               <b style={{ color: '#0b1020', fontSize: 15, display: 'block' }}>{o.name}</b>
-                              <span style={{ fontSize: 11, color: '#64748b' }}>Slug: {o.slug}</span>
+                              <span style={{ fontSize: 11, color: '#64748b' }}>Slug: /b/{o.slug}</span>
                             </div>
                           </div>
                         </td>
@@ -308,9 +339,19 @@ export default function SuperAdmin() {
                           </Link>
                         </td>
 
-                        <td style={{ fontWeight: 600 }}>{o._count?.barbers ?? 0} barbero(s)</td>
-                        <td style={{ fontWeight: 600 }}>{o._count?.appointments ?? 0}</td>
-                        <td style={{ fontWeight: 600 }}>{o._count?.clients ?? 0}</td>
+                        <td>
+                          <button
+                            onClick={() => setBarbersModal({ open: true, org: o })}
+                            className="btn-action-sm btn-unblock"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                          >
+                            <Scissors size={13} /> {allowedCount} Barbero(s) (Ver / Jerarquía)
+                          </button>
+                        </td>
+
+                        <td style={{ fontWeight: 700, color: '#334155' }}>
+                          {o._count?.appointments ?? 0}
+                        </td>
 
                         <td>
                           <span
@@ -334,14 +375,6 @@ export default function SuperAdmin() {
                         <td style={{ textAlign: 'right' }}>
                           <div style={{ display: 'inline-flex', gap: 6 }}>
                             <button
-                              onClick={() => setEditModal({ open: true, org: { ...o } })}
-                              className="btn-action-sm btn-block"
-                              title="Editar datos y logo"
-                            >
-                              <Edit2 size={13} style={{ display: 'inline', marginRight: 4 }} /> Editar
-                            </button>
-
-                            <button
                               onClick={() => toggleStatus(o)}
                               className={`btn-action-sm ${isActive ? 'btn-cancel' : 'btn-unblock'}`}
                             >
@@ -351,7 +384,7 @@ export default function SuperAdmin() {
                                 </>
                               ) : (
                                 <>
-                                  <PlayCircle size={13} style={{ display: 'inline', marginRight: 4 }} /> Activar
+                                  <PlayCircle size={13} style={{ display: 'inline', marginRight: 4 }} /> Reactivar
                                 </>
                               )}
                             </button>
@@ -368,14 +401,14 @@ export default function SuperAdmin() {
 
       </div>
 
-      {/* MODAL CREAR BARBERÍA */}
+      {/* MODAL CREAR BARBERÍA CON BARBEROS Y JERARQUÍA */}
       {createModal && (
         <div className="modal-hours-overlay">
-          <div className="modal-hours-box" style={{ maxWidth: 480 }}>
+          <div className="modal-hours-box" style={{ maxWidth: 540 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
-                <span className="cal-eyebrow">NUEVO NEGOCIO SAAS</span>
-                <h3 style={{ fontFamily: 'Sora', fontSize: 19, marginTop: 2 }}>Registrar Barbería</h3>
+                <span className="cal-eyebrow">NUEVA BARBERÍA SAAS</span>
+                <h3 style={{ fontFamily: 'Sora', fontSize: 19, marginTop: 2 }}>Registrar Barbería y Barberos</h3>
               </div>
               <button onClick={() => setCreateModal(false)} className="btn-logout-modern" style={{ padding: '6px 10px' }}>
                 <X size={16} />
@@ -384,126 +417,219 @@ export default function SuperAdmin() {
 
             <form onSubmit={handleCreate}>
               <div className="input-group">
-                <label className="input-label">Nombre de la Barbería</label>
+                <label className="input-label">Nombre del Negocio</label>
                 <input
                   type="text"
                   required
-                  placeholder="Ej. Barbería Élite Roma"
+                  placeholder="Ej. Barbería Élite"
                   className="clean-input"
                   value={name}
                   onChange={(e) => {
                     setName(e.target.value);
-                    if (!slug) {
-                      setSlug(e.target.value.toLowerCase().trim().replace(/[^a-z0-9]/g, '-'));
-                    }
+                    if (!slug) setSlug(e.target.value.toLowerCase().trim().replace(/[^a-z0-9]/g, '-'));
                   }}
                 />
               </div>
 
               <div className="input-group">
-                <label className="input-label">Slug de Acceso (URL del Negocio)</label>
+                <label className="input-label">Slug de Acceso (URL)</label>
                 <input
                   type="text"
                   required
-                  placeholder="ej. elite-roma"
+                  placeholder="elite"
                   className="clean-input"
                   value={slug}
                   onChange={(e) => setSlug(e.target.value)}
                 />
                 <small style={{ fontSize: 11, color: '#64748b', display: 'block', marginTop: 4 }}>
-                  Su enlace será: <b>app.asysdigital.com/b/{slug || 'nombre-slug'}</b>
+                  Link: <b>app.asysdigital.com/b/{slug || 'nombre-slug'}</b>
                 </small>
               </div>
 
               <div className="input-group">
-                <label className="input-label">URL del Logo (Opcional)</label>
+                <label className="input-label">Logo de la Barbería (URL de imagen)</label>
                 <input
                   type="url"
-                  placeholder="https://... (enlace de la imagen)"
+                  placeholder="https://images.unsplash.com/..."
                   className="clean-input"
                   value={logoUrl}
                   onChange={(e) => setLogoUrl(e.target.value)}
                 />
               </div>
 
-              <div className="input-group">
-                <label className="input-label">Límite Máximo de Barberos</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={50}
-                  className="clean-input"
-                  value={maxBarbers}
-                  onChange={(e) => setMaxBarbers(Number(e.target.value))}
-                />
+              {/* LISTA DE BARBEROS AUTORIZADOS Y JERARQUÍA */}
+              <div style={{ background: '#f8fafc', border: '1.5px solid #e2e8f0', borderRadius: 14, padding: 16, marginTop: 14, marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <b style={{ fontSize: 13, color: '#0b1020' }}>Barberos Autorizados (WhatsApp y Jerarquía)</b>
+                  <button
+                    type="button"
+                    onClick={() => setBarberList([...barberList, { name: '', phone: '', priority: barberList.length + 1 }])}
+                    className="btn-action-sm btn-unblock"
+                    style={{ fontSize: 11 }}
+                  >
+                    + Añadir Barbero
+                  </button>
+                </div>
+                <p style={{ fontSize: 11, color: '#64748b', marginBottom: 12 }}>
+                  *Jerarquía 1 tiene máxima prioridad: cuando un cliente elija "Cualquiera", el sistema asignará primero a este barbero si está libre.
+                </p>
+
+                {barberList.map((b, idx) => (
+                  <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 0.8fr auto', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                    <input
+                      type="text"
+                      placeholder="Nombre del barbero"
+                      className="clean-input"
+                      style={{ padding: '8px 10px', fontSize: 13 }}
+                      value={b.name}
+                      onChange={(e) => {
+                        const copy = [...barberList];
+                        copy[idx].name = e.target.value;
+                        setBarberList(copy);
+                      }}
+                    />
+                    <input
+                      type="tel"
+                      placeholder="WhatsApp (300123...)"
+                      className="clean-input"
+                      style={{ padding: '8px 10px', fontSize: 13 }}
+                      value={b.phone}
+                      onChange={(e) => {
+                        const copy = [...barberList];
+                        copy[idx].phone = e.target.value;
+                        setBarberList(copy);
+                      }}
+                    />
+                    <select
+                      value={b.priority}
+                      onChange={(e) => {
+                        const copy = [...barberList];
+                        copy[idx].priority = Number(e.target.value);
+                        setBarberList(copy);
+                      }}
+                      className="clean-input"
+                      style={{ padding: '8px 6px', fontSize: 12 }}
+                    >
+                      <option value={1}>1º Prioridad</option>
+                      <option value={2}>2º Prioridad</option>
+                      <option value={3}>3º Prioridad</option>
+                      <option value={4}>4º Prioridad</option>
+                      <option value={5}>5º Prioridad</option>
+                    </select>
+
+                    {barberList.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setBarberList(barberList.filter((_, i) => i !== idx))}
+                        className="btn-dark"
+                        style={{ padding: '8px' }}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
 
-              <button type="submit" disabled={submitting} className="btn-clean-submit" style={{ marginTop: 10 }}>
-                {submitting ? 'Creando negocio...' : 'Crear y Habilitar Barbería →'}
+              <button type="submit" disabled={submitting} className="btn-clean-submit">
+                {submitting ? 'Creando...' : 'Crear Barbería y Guardar Barberos →'}
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL EDITAR BARBERÍA */}
-      {editModal.open && editModal.org && (
+      {/* MODAL GESTIÓN DE BARBEROS EN BARBERÍA EXISTENTE */}
+      {barbersModal.open && barbersModal.org && (
         <div className="modal-hours-overlay">
-          <div className="modal-hours-box" style={{ maxWidth: 480 }}>
+          <div className="modal-hours-box" style={{ maxWidth: 540 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
-                <span className="cal-eyebrow">EDITAR TENANT</span>
-                <h3 style={{ fontFamily: 'Sora', fontSize: 19, marginTop: 2 }}>{editModal.org.name}</h3>
+                <span className="cal-eyebrow">BARBEROS DE {barbersModal.org.name.toUpperCase()}</span>
+                <h3 style={{ fontFamily: 'Sora', fontSize: 19, marginTop: 2 }}>Lista Blanca y Jerarquía</h3>
               </div>
-              <button onClick={() => setEditModal({ open: false, org: null })} className="btn-logout-modern" style={{ padding: '6px 10px' }}>
+              <button onClick={() => setBarbersModal({ open: false, org: null })} className="btn-logout-modern" style={{ padding: '6px 10px' }}>
                 <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={handleUpdate}>
-              <div className="input-group">
-                <label className="input-label">Nombre</label>
+            {/* Listado actual */}
+            <div style={{ marginBottom: 20 }}>
+              <b style={{ fontSize: 13, color: '#0b1020', display: 'block', marginBottom: 8 }}>Barberos Habilitados:</b>
+              {(!barbersModal.org.allowedBarbers || barbersModal.org.allowedBarbers.length === 0) ? (
+                <div style={{ padding: 16, background: '#f8fafc', borderRadius: 12, fontSize: 13, color: '#64748b', textAlign: 'center' }}>
+                  No hay números de barberos autorizados todavía.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {barbersModal.org.allowedBarbers.map((ab: any) => (
+                    <div key={ab.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', padding: '10px 14px', borderRadius: 10, border: '1px solid #e2e8f0' }}>
+                      <div>
+                        <b style={{ fontSize: 14, color: '#0b1020' }}>{ab.name}</b>
+                        <span style={{ fontSize: 12, color: '#64748b', display: 'block' }}>
+                          📱 {ab.phone} · <span style={{ color: '#1554ff', fontWeight: 800 }}>Prioridad #{ab.priority}</span> {ab.claimed ? '· (Registrado ✓)' : '· (Pendiente por registrarse)'}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => handleRemoveAllowedBarber(ab.id)}
+                        className="btn-action-sm btn-cancel"
+                        style={{ padding: '6px 10px' }}
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Formulario para agregar otro barbero */}
+            <form onSubmit={handleAddBarberToOrg} style={{ background: '#eff6ff', padding: 16, borderRadius: 14, border: '1px solid #bfdbfe' }}>
+              <b style={{ fontSize: 13, color: '#1e3a8a', display: 'block', marginBottom: 8 }}>Autorizar Nuevo Celular para Barbero:</b>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 0.8fr', gap: 8, marginBottom: 10 }}>
                 <input
                   type="text"
                   required
+                  placeholder="Nombre barbero"
                   className="clean-input"
-                  value={editModal.org.name}
-                  onChange={(e) => setEditModal({ ...editModal, org: { ...editModal.org, name: e.target.value } })}
+                  style={{ padding: '8px 10px', fontSize: 13 }}
+                  value={newBName}
+                  onChange={(e) => setNewBName(e.target.value)}
                 />
-              </div>
-
-              <div className="input-group">
-                <label className="input-label">URL del Logo</label>
                 <input
-                  type="url"
-                  placeholder="https://..."
+                  type="tel"
+                  required
+                  placeholder="WhatsApp"
                   className="clean-input"
-                  value={editModal.org.logoUrl || ''}
-                  onChange={(e) => setEditModal({ ...editModal, org: { ...editModal.org, logoUrl: e.target.value } })}
+                  style={{ padding: '8px 10px', fontSize: 13 }}
+                  value={newBPhone}
+                  onChange={(e) => setNewBPhone(e.target.value)}
                 />
+                <select
+                  value={newBPriority}
+                  onChange={(e) => setNewBPriority(Number(e.target.value))}
+                  className="clean-input"
+                  style={{ padding: '8px 6px', fontSize: 12 }}
+                >
+                  <option value={1}>1º Prioridad</option>
+                  <option value={2}>2º Prioridad</option>
+                  <option value={3}>3º Prioridad</option>
+                  <option value={4}>4º Prioridad</option>
+                  <option value={5}>5º Prioridad</option>
+                </select>
               </div>
 
-              <div className="input-group">
-                <label className="input-label">Máx. Barberos Permitidos</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={50}
-                  className="clean-input"
-                  value={editModal.org.maxBarbers}
-                  onChange={(e) => setEditModal({ ...editModal, org: { ...editModal.org, maxBarbers: Number(e.target.value) } })}
-                />
-              </div>
-
-              <button type="submit" disabled={submitting} className="btn-clean-submit" style={{ marginTop: 10 }}>
-                {submitting ? 'Guardando...' : 'Guardar Cambios →'}
+              <button type="submit" disabled={submitting} className="btn-clean-submit" style={{ padding: '10px' }}>
+                {submitting ? 'Autorizando...' : '+ Autorizar Celular para Barbero'}
               </button>
             </form>
+
           </div>
         </div>
       )}
 
-      {/* MODAL DE ALERTAS ASYS */}
+      {/* MODAL ALERTA */}
       {alertModal && alertModal.open && (
         <div className="modal-hours-overlay">
           <div className="asys-alert-modal">

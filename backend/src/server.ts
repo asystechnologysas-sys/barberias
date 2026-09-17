@@ -75,7 +75,7 @@ app.get('/api/public/:slug', asyncRoute(async (req, res) => {
     where: { slug: String(req.params.slug) },
     include: {
       services: { where: { active: true } },
-      barbers: { where: { active: true }, select: { id: true, displayName: true } },
+      barbers: { where: { active: true }, select: { id: true, displayName: true, priority: true }, orderBy: { priority: 'asc' } },
       schedules: true,
       blockedSlots: true
     }
@@ -93,9 +93,10 @@ app.get('/api/public/:slug', asyncRoute(async (req, res) => {
   });
 }));
 
-// DISPONIBILIDAD EXACTA
+// DISPONIBILIDAD EXACTA (SOPORTE MULTI-BARBERO Y PREFERENCIA)
 app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
   const dateStr = String(req.query.date);
+  const barberIdParam = req.query.barberId ? String(req.query.barberId) : null;
   const org = await db.organization.findUnique({ where: { slug: String(req.params.slug) } });
   if (!org) return fail(res, 404, 'ORGANIZATION_NOT_FOUND', 'Barbería no encontrada.');
 
@@ -119,54 +120,51 @@ app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
   const reqDate = new Date(`${dateStr}T12:00:00-05:00`);
   const dayOfWeek = reqDate.getDay();
 
-  const fullDayBlock = await db.blockedSlot.findFirst({
-    where: {
-      organizationId: org.id,
-      startsAt: { lte: dayStart },
-      endsAt: { gte: dayEnd }
-    }
+  // 1. Obtener los barberos a evaluar (uno específico o todos los activos)
+  const whereBarbers: any = { organizationId: org.id, active: true };
+  if (barberIdParam && barberIdParam !== 'any' && barberIdParam !== '') {
+    whereBarbers.id = barberIdParam;
+  }
+
+  const barbers = await db.barber.findMany({
+    where: whereBarbers,
+    orderBy: { priority: 'asc' }
   });
 
-  const barber = await db.barber.findFirst({ where: { organizationId: org.id, active: true } });
-  const schedule = await db.daySchedule.findFirst({
-    where: {
-      organizationId: org.id,
-      weekday: dayOfWeek,
-      OR: [{ barberId: barber?.id || null }, { barberId: null }]
-    },
-    orderBy: { barberId: 'desc' }
-  });
-
-  const isDayClosed = !!fullDayBlock || !!schedule?.closed;
-
-  if (isDayClosed) {
+  if (barbers.length === 0) {
     return res.json({
       success: true,
       data: {
         slots: [],
         isClosed: true,
         status: 'closed',
-        statusText: 'Cerrado',
+        statusText: 'Sin barberos',
         freeSlotsCount: 0,
         totalSlots: 0
       }
     });
   }
 
-  const openH = Number((schedule?.openTime || '09:00').slice(0, 2));
-  const closeH = Number((schedule?.closeTime || '20:00').slice(0, 2));
-
-  const workingSlots = MASTER_HOURS.filter(h => {
-    const slotH = Number(h.slice(0, 2));
-    return slotH >= openH && slotH < closeH;
-  });
-
-  const totalSlots = workingSlots.length;
-
-  const [appointments, blocks, vips] = await Promise.all([
+  // 2. Traer horarios, citas, bloqueos y VIPs de los barberos
+  const [schedules, fullDayBlocks, appointments, blocks, vips] = await Promise.all([
+    db.daySchedule.findMany({
+      where: {
+        organizationId: org.id,
+        weekday: dayOfWeek,
+        OR: [{ barberId: { in: barbers.map(b => b.id) } }, { barberId: null }]
+      }
+    }),
+    db.blockedSlot.findMany({
+      where: {
+        organizationId: org.id,
+        startsAt: { lte: dayStart },
+        endsAt: { gte: dayEnd }
+      }
+    }),
     db.appointment.findMany({
       where: {
         organizationId: org.id,
+        barberId: { in: barbers.map(b => b.id) },
         status: AppointmentStatus.CONFIRMED,
         startsAt: { gte: dayStart, lte: dayEnd }
       }
@@ -180,6 +178,7 @@ app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
     db.vipSchedule.findMany({
       where: {
         organizationId: org.id,
+        barberId: { in: barbers.map(b => b.id) },
         weekday: dayOfWeek,
         active: true
       },
@@ -187,34 +186,69 @@ app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
     })
   ]);
 
-  const freeSlots: { time: string }[] = [];
+  // Si todos los barberos seleccionados tienen el día cerrado
+  let allBarbersClosed = true;
+  const availableSlotsSet = new Set<string>();
+  let maxPossibleSlots = 0;
 
-  for (const h of workingSlots) {
-    const isBooked = appointments.some(a => toBogotaHour(a.startsAt) === h);
-    const isBlocked = blocks.some(b => toBogotaHour(b.startsAt) === h);
-    
-    const isVipLocked = vips.some(v => {
-      if (v.time !== h) return false;
-      const isSkippedThisDay = v.exceptions?.some(e => {
-        const exDate = new Date(e.date).toISOString().split('T')[0];
-        return exDate === dateStr;
-      });
-      return !isSkippedThisDay;
+  for (const b of barbers) {
+    const isBFullDayBlocked = fullDayBlocks.some(blk => blk.barberId === b.id || !blk.barberId);
+    const bSchedule = schedules.find(s => s.barberId === b.id) || schedules.find(s => s.barberId === null);
+    if (isBFullDayBlocked || bSchedule?.closed) continue;
+
+    allBarbersClosed = false;
+
+    const openH = Number((bSchedule?.openTime || '09:00').slice(0, 2));
+    const closeH = Number((bSchedule?.closeTime || '20:00').slice(0, 2));
+
+    const bWorkingSlots = MASTER_HOURS.filter(h => {
+      const slotH = Number(h.slice(0, 2));
+      return slotH >= openH && slotH < closeH;
     });
 
-    if (!isBooked && !isBlocked && !isVipLocked) {
-      freeSlots.push({ time: h });
+    if (bWorkingSlots.length > maxPossibleSlots) {
+      maxPossibleSlots = bWorkingSlots.length;
+    }
+
+    for (const h of bWorkingSlots) {
+      const isBooked = appointments.some(a => a.barberId === b.id && toBogotaHour(a.startsAt) === h);
+      const isBlocked = blocks.some(blk => (blk.barberId === b.id || !blk.barberId) && toBogotaHour(blk.startsAt) === h);
+      const isVipLocked = vips.some(v => {
+        if (v.barberId !== b.id || v.time !== h) return false;
+        const isSkipped = v.exceptions?.some(e => new Date(e.date).toISOString().split('T')[0] === dateStr);
+        return !isSkipped;
+      });
+
+      if (!isBooked && !isBlocked && !isVipLocked) {
+        availableSlotsSet.add(h);
+      }
     }
   }
 
+  if (allBarbersClosed) {
+    return res.json({
+      success: true,
+      data: {
+        slots: [],
+        isClosed: true,
+        status: 'closed',
+        statusText: 'Cerrado',
+        freeSlotsCount: 0,
+        totalSlots: 0
+      }
+    });
+  }
+
+  const freeSlots = MASTER_HOURS.filter(h => availableSlotsSet.has(h)).map(time => ({ time }));
   const freeSlotsCount = freeSlots.length;
+
   let status = 'green';
   let statusText = `${freeSlotsCount} libres ●`;
 
-  if (totalSlots === 0 || freeSlotsCount === 0) {
+  if (maxPossibleSlots === 0 || freeSlotsCount === 0) {
     status = 'full';
     statusText = 'Lleno ●';
-  } else if (freeSlotsCount <= 2 || (freeSlotsCount / totalSlots) <= 0.5) {
+  } else if (freeSlotsCount <= 2 || (freeSlotsCount / maxPossibleSlots) <= 0.5) {
     status = 'yellow';
     statusText = `${freeSlotsCount} libres ●`;
   } else {
@@ -230,18 +264,21 @@ app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
       status,
       statusText,
       freeSlotsCount,
-      totalSlots
+      totalSlots: maxPossibleSlots
     }
   });
 }));
 
-// 2. AUTHENTICATION (MULTI-TENANT & GLOBAL)
+// 2. AUTHENTICATION (CON AUTODETECCIÓN DE BARBERO PRE-AUTORIZADO)
 app.post('/api/auth/login', asyncRoute(async (req, res) => {
   const v = z.object({
     email: z.string(),
     password: z.string().min(4),
     slug: z.string().optional()
   }).parse(req.body);
+
+  const cleanLogin = v.email.trim();
+  const cleanPhone = cleanLogin.replace(/[^0-9+]/g, '');
 
   let targetOrgId: string | undefined;
   if (v.slug) {
@@ -250,23 +287,36 @@ app.post('/api/auth/login', asyncRoute(async (req, res) => {
   }
 
   const whereClause: any = {
-    OR: [{ email: v.email }, { phone: v.email }]
+    OR: [
+      { email: cleanLogin },
+      { phone: cleanPhone }
+    ]
   };
+
   if (targetOrgId) {
     whereClause.OR = [
-      { email: v.email, organizationId: targetOrgId },
-      { phone: v.email, organizationId: targetOrgId },
-      { email: v.email, role: Role.SUPERADMIN }
+      { email: cleanLogin, organizationId: targetOrgId },
+      { phone: cleanPhone, organizationId: targetOrgId },
+      { email: cleanLogin, role: Role.SUPERADMIN }
     ];
   }
 
   const user = await db.user.findFirst({
     where: whereClause,
-    include: { organization: true, client: true }
+    include: { organization: true, client: true, barber: true }
   });
 
   if (!user || !user.active || !(await bcrypt.compare(v.password, user.passwordHash))) {
     return fail(res, 401, 'INVALID_CREDENTIALS', 'Celular o contraseña incorrecta.');
+  }
+
+  // Verificación estricta: Si la barbería está suspendida, frenar incluso a Dueños y Barberos
+  if (user.role !== Role.SUPERADMIN && user.organization) {
+    const isSuspended = user.organization.status !== OrganizationStatus.ACTIVE ||
+      (user.organization.subscriptionExpiresAt && user.organization.subscriptionExpiresAt <= new Date());
+    if (isSuspended) {
+      return fail(res, 403, 'ORGANIZATION_SUSPENDED', 'El acceso a esta barbería está pausado por administración.');
+    }
   }
 
   let isVip = false;
@@ -330,6 +380,83 @@ app.post('/api/auth/register', asyncRoute(async (req, res) => {
     return fail(res, 400, 'PHONE_EXISTS', 'Ya existe una cuenta con este celular en esta barbería. Inicia sesión.');
   }
 
+  // 1. REVISAR SI ESTE CELULAR ESTÁ EN LA LISTA BLANCA DE BARBEROS DE ESTA BARBERÍA
+  const allowedBarber = await db.allowedBarber.findFirst({
+    where: {
+      organizationId: org.id,
+      phone: cleanPhone
+    }
+  });
+
+  // Si es un barbero pre-autorizado por el SuperAdmin
+  if (allowedBarber) {
+    const user = await db.user.create({
+      data: {
+        name: v.name,
+        phone: cleanPhone,
+        email: generatedEmail,
+        passwordHash,
+        role: Role.BARBER,
+        organizationId: org.id,
+        barber: {
+          create: {
+            organizationId: org.id,
+            displayName: v.name,
+            priority: allowedBarber.priority
+          }
+        }
+      },
+      include: { barber: true, organization: true }
+    });
+
+    // Marcar que ya reclamó su cuenta
+    await db.allowedBarber.update({
+      where: { id: allowedBarber.id },
+      data: { claimed: true }
+    });
+
+    // Crear sus 7 días de horario inicial por defecto
+    for (let day = 0; day < 7; day++) {
+      await db.daySchedule.upsert({
+        where: {
+          organizationId_barberId_weekday: {
+            organizationId: org.id,
+            barberId: user.barber!.id,
+            weekday: day
+          }
+        },
+        update: {},
+        create: {
+          organizationId: org.id,
+          barberId: user.barber!.id,
+          weekday: day,
+          openTime: '09:00',
+          closeTime: '20:00',
+          closed: day === 0
+        }
+      });
+    }
+
+    const token = tokenFor(user);
+    return res.status(201).json({
+      success: true,
+      data: {
+        token,
+        user: {
+          id: user.id,
+          name: user.name,
+          phone: user.phone,
+          role: user.role,
+          organizationId: user.organizationId,
+          organizationSlug: user.organization?.slug,
+          isVip: false,
+          vipInfo: null
+        }
+      }
+    });
+  }
+
+  // 2. Si no es barbero, se registra normalmente como CLIENTE
   const user = await db.user.create({
     data: {
       name: v.name,
@@ -375,10 +502,12 @@ app.post('/api/auth/logout', (_q, res) => {
   res.clearCookie('access_token').json({ success: true });
 });
 
-// 3. HORARIOS
+// 3. HORARIOS (GESTIÓN DEL PROPIO BARBERO)
 app.get('/api/schedules', auth, activeTenant, asyncRoute(async (req, res) => {
   const orgId = req.auth!.organizationId!;
-  const barber = await db.barber.findFirst({ where: { organizationId: orgId } });
+  const barber = await db.barber.findFirst({ where: { userId: req.auth!.id } }) ||
+                 await db.barber.findFirst({ where: { organizationId: orgId } });
+  
   const schedules = await db.daySchedule.findMany({
     where: { organizationId: orgId, OR: [{ barberId: barber?.id || null }, { barberId: null }] },
     orderBy: { weekday: 'asc' }
@@ -389,7 +518,8 @@ app.get('/api/schedules', auth, activeTenant, asyncRoute(async (req, res) => {
 app.put('/api/schedules', auth, activeTenant, asyncRoute(async (req, res) => {
   const { schedules } = req.body;
   const orgId = req.auth!.organizationId!;
-  const barber = await db.barber.findFirst({ where: { organizationId: orgId } });
+  const barber = await db.barber.findFirst({ where: { userId: req.auth!.id } }) ||
+                 await db.barber.findFirst({ where: { organizationId: orgId } });
 
   for (const s of schedules) {
     await db.daySchedule.upsert({
@@ -444,7 +574,7 @@ app.patch('/api/services/:id', auth, activeTenant, asyncRoute(async (req, res) =
   res.json({ success: true, data: updated });
 }));
 
-// 5. CITAS
+// 5. CITAS CON ASIGNACIÓN AUTOMÁTICA POR JERARQUÍA
 app.post('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) => {
   try {
     const v = z.object({
@@ -495,28 +625,63 @@ app.post('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) =>
     const service = await db.service.findFirst({ where: { id: v.serviceId, organizationId: orgId } });
     if (!service) return fail(res, 404, 'SERVICE_NOT_FOUND', 'Servicio no encontrado.');
 
-    let barberId = v.barberId;
-    if (!barberId) {
-      const b = await db.barber.findFirst({ where: { organizationId: orgId, active: true } });
-      barberId = b?.id;
-    }
-    if (!barberId) return fail(res, 404, 'BARBER_NOT_FOUND', 'No hay barberos disponibles.');
+    const startsAt = v.startsAt;
+    const endsAt = new Date(startsAt.getTime() + 60 * 60 * 1000);
+    const slotHour = toBogotaHour(startsAt);
+    const dayOfWeek = startsAt.getDay();
 
-    const endsAt = new Date(v.startsAt.getTime() + 60 * 60 * 1000);
+    // SELECCIÓN O ASIGNACIÓN DE BARBERO (ORDEN JERÁRQUICO)
+    let selectedBarberId = v.barberId && v.barberId !== 'any' ? v.barberId : null;
+
+    if (!selectedBarberId) {
+      // Traer todos los barberos ordenados por prioridad (menor número = mayor jerarquía)
+      const barbers = await db.barber.findMany({
+        where: { organizationId: orgId, active: true },
+        orderBy: { priority: 'asc' }
+      });
+
+      for (const b of barbers) {
+        // Verificar que no tenga cita ni bloqueo
+        const hasApt = await db.appointment.findFirst({
+          where: { barberId: b.id, status: AppointmentStatus.CONFIRMED, startsAt }
+        });
+        const hasBlock = await db.blockedSlot.findFirst({
+          where: {
+            organizationId: orgId,
+            OR: [{ barberId: b.id }, { barberId: null }],
+            startsAt: { lte: startsAt },
+            endsAt: { gte: endsAt }
+          }
+        });
+        const hasVip = await db.vipSchedule.findFirst({
+          where: { barberId: b.id, weekday: dayOfWeek, time: slotHour, active: true }
+        });
+
+        if (!hasApt && !hasBlock && !hasVip) {
+          selectedBarberId = b.id;
+          break; // Tomar el primero disponible por jerarquía
+        }
+      }
+    }
+
+    if (!selectedBarberId) {
+      return fail(res, 409, 'SLOT_OCCUPIED', 'No hay barberos disponibles para esta hora.');
+    }
 
     const appointment = await db.appointment.create({
       data: {
         organizationId: orgId,
-        barberId,
+        barberId: selectedBarberId,
         clientId: client.id,
         serviceId: service.id,
         clientName: u.name,
         clientPhone: u.phone || client.phone,
-        startsAt: v.startsAt,
+        startsAt,
         endsAt,
         price: service.price,
         status: AppointmentStatus.CONFIRMED
-      }
+      },
+      include: { barber: true }
     });
 
     res.status(201).json({ success: true, data: appointment });
@@ -532,6 +697,9 @@ app.get('/api/appointments', auth, activeTenant, asyncRoute(async (req, res) => 
     const c = await db.client.findFirst({ where: { userId: req.auth!.id } });
     if (!c) return res.json({ success: true, data: [] });
     where.clientId = c.id;
+  } else if (req.auth!.role === Role.BARBER) {
+    const b = await db.barber.findFirst({ where: { userId: req.auth!.id } });
+    if (b) where.barberId = b.id;
   }
 
   const appointments = await db.appointment.findMany({
@@ -558,8 +726,13 @@ app.patch('/api/appointments/:id/cancel', auth, activeTenant, asyncRoute(async (
 
 // 6. BLOQUEOS
 app.get('/api/blocks', auth, activeTenant, asyncRoute(async (req, res) => {
+  const where: any = { organizationId: req.auth!.organizationId! };
+  if (req.auth!.role === Role.BARBER) {
+    const b = await db.barber.findFirst({ where: { userId: req.auth!.id } });
+    if (b) where.OR = [{ barberId: b.id }, { barberId: null }];
+  }
   const blocks = await db.blockedSlot.findMany({
-    where: { organizationId: req.auth!.organizationId! },
+    where,
     orderBy: { startsAt: 'asc' }
   });
   res.json({ success: true, data: blocks });
@@ -572,9 +745,12 @@ app.post('/api/blocks', auth, activeTenant, asyncRoute(async (req, res) => {
     reason: z.string().optional()
   }).parse(req.body);
 
+  const b = await db.barber.findFirst({ where: { userId: req.auth!.id } });
+
   const block = await db.blockedSlot.create({
     data: {
       organizationId: req.auth!.organizationId!,
+      barberId: b?.id || null,
       startsAt: v.startsAt,
       endsAt: v.endsAt,
       reason: v.reason || 'Descanso'
@@ -588,10 +764,12 @@ app.post('/api/blocks/day', auth, activeTenant, asyncRoute(async (req, res) => {
   const { dateStr, reason } = req.body;
   const startsAt = new Date(`${dateStr}T00:00:00-05:00`);
   const endsAt = new Date(`${dateStr}T23:59:59-05:00`);
+  const b = await db.barber.findFirst({ where: { userId: req.auth!.id } });
 
   await db.blockedSlot.deleteMany({
     where: {
       organizationId: req.auth!.organizationId!,
+      barberId: b?.id || null,
       startsAt: { gte: startsAt },
       endsAt: { lte: endsAt }
     }
@@ -600,6 +778,7 @@ app.post('/api/blocks/day', auth, activeTenant, asyncRoute(async (req, res) => {
   const block = await db.blockedSlot.create({
     data: {
       organizationId: req.auth!.organizationId!,
+      barberId: b?.id || null,
       startsAt,
       endsAt,
       reason: reason || 'Día Cerrado'
@@ -613,10 +792,12 @@ app.delete('/api/blocks/day/:dateStr', auth, activeTenant, asyncRoute(async (req
   const dateStr = String(req.params.dateStr);
   const startsAt = new Date(`${dateStr}T00:00:00-05:00`);
   const endsAt = new Date(`${dateStr}T23:59:59-05:00`);
+  const b = await db.barber.findFirst({ where: { userId: req.auth!.id } });
 
   await db.blockedSlot.deleteMany({
     where: {
       organizationId: req.auth!.organizationId!,
+      barberId: b?.id || null,
       startsAt: { gte: startsAt },
       endsAt: { lte: endsAt }
     }
@@ -646,8 +827,12 @@ app.get('/api/clients', auth, activeTenant, asyncRoute(async (req, res) => {
 }));
 
 app.get('/api/vip', auth, activeTenant, asyncRoute(async (req, res) => {
+  const b = await db.barber.findFirst({ where: { userId: req.auth!.id } });
+  const where: any = { organizationId: req.auth!.organizationId! };
+  if (b) where.barberId = b.id;
+
   const vips = await db.vipSchedule.findMany({
-    where: { organizationId: req.auth!.organizationId! },
+    where,
     include: { client: true, barber: true, exceptions: true }
   });
   res.json({ success: true, data: vips });
@@ -672,12 +857,13 @@ app.post('/api/vip', auth, activeTenant, asyncRoute(async (req, res) => {
     time: z.string()
   }).parse(req.body);
 
-  const barber = await db.barber.findFirst({ where: { organizationId: req.auth!.organizationId! } });
+  const barber = await db.barber.findFirst({ where: { userId: req.auth!.id } }) ||
+                 await db.barber.findFirst({ where: { organizationId: req.auth!.organizationId! } });
   if (!barber) return fail(res, 404, 'BARBER_NOT_FOUND', 'Barbero no encontrado.');
 
   const existingVip = await db.vipSchedule.findFirst({
     where: {
-      organizationId: req.auth!.organizationId!,
+      barberId: barber.id,
       weekday: v.weekday,
       time: v.time,
       active: true
@@ -755,7 +941,7 @@ app.post('/api/vip/reschedule-week', auth, activeTenant, asyncRoute(async (req, 
   res.json({ success: true, data: newAppointment });
 }));
 
-// 8. SUPERADMIN MULTI-TENANT (CREACIÓN, EDICIÓN, LOGO Y SUSCRIPCIÓN)
+// 8. SUPERADMIN: GESTIÓN MULTI-TENANT Y LISTA BLANCA DE BARBEROS
 app.get('/api/superadmin/stats', auth, role(Role.SUPERADMIN), asyncRoute(async (_q, res) => {
   const [total, active, suspended, totalBarbers, totalAppointments, totalClients] = await Promise.all([
     db.organization.count(),
@@ -783,7 +969,8 @@ app.get('/api/superadmin/organizations', auth, role(Role.SUPERADMIN), asyncRoute
   const orgs = await db.organization.findMany({
     include: {
       _count: { select: { barbers: true, appointments: true, clients: true } },
-      services: { select: { id: true, name: true, price: true } }
+      barbers: { select: { id: true, displayName: true, priority: true } },
+      allowedBarbers: { orderBy: { priority: 'asc' } }
     },
     orderBy: { createdAt: 'desc' }
   });
@@ -795,12 +982,15 @@ app.post('/api/superadmin/organizations', auth, role(Role.SUPERADMIN), asyncRout
     name: z.string().min(2),
     slug: z.string().regex(/^[a-z0-9-]+$/),
     logoUrl: z.string().url().optional().or(z.literal('')),
-    subscriptionExpiresAt: z.coerce.date().optional(),
-    maxBarbers: z.number().int().min(1).max(100).default(5)
+    maxBarbers: z.number().int().min(1).max(50).default(5),
+    barbers: z.array(z.object({
+      name: z.string().min(2),
+      phone: z.string().min(7),
+      priority: z.number().int().default(1)
+    })).optional().default([])
   }).parse(req.body);
 
-  // Por defecto suscripción a muy largo plazo (2099) para que quede permanente hasta pausar manualmente
-  const defaultExpiry = v.subscriptionExpiresAt || new Date('2099-12-31T23:59:59Z');
+  const defaultExpiry = new Date('2099-12-31T23:59:59Z');
 
   const org = await db.organization.create({
     data: {
@@ -812,7 +1002,22 @@ app.post('/api/superadmin/organizations', auth, role(Role.SUPERADMIN), asyncRout
     }
   });
 
-  // Crear 3 servicios base por defecto para que la barbería arranque lista
+  // Guardar los números de barberos pre-autorizados con su orden de jerarquía
+  if (v.barbers.length > 0) {
+    for (const b of v.barbers) {
+      const cleanPhone = b.phone.replace(/[^0-9+]/g, '');
+      await db.allowedBarber.create({
+        data: {
+          organizationId: org.id,
+          name: b.name,
+          phone: cleanPhone,
+          priority: b.priority
+        }
+      });
+    }
+  }
+
+  // Crear 3 servicios de corte base
   await db.service.createMany({
     data: [
       { organizationId: org.id, name: 'Corte Clásico', price: 25000, durationMinutes: 45 },
@@ -829,8 +1034,7 @@ app.patch('/api/superadmin/organizations/:id', auth, role(Role.SUPERADMIN), asyn
     name: z.string().min(2).optional(),
     logoUrl: z.string().optional().nullable(),
     status: z.nativeEnum(OrganizationStatus).optional(),
-    subscriptionExpiresAt: z.coerce.date().optional(),
-    maxBarbers: z.number().int().min(1).max(100).optional()
+    maxBarbers: z.number().int().min(1).max(50).optional()
   }).parse(req.body);
 
   const org = await db.organization.update({
@@ -840,10 +1044,46 @@ app.patch('/api/superadmin/organizations/:id', auth, role(Role.SUPERADMIN), asyn
   res.json({ success: true, data: org });
 }));
 
-app.delete('/api/superadmin/organizations/:id', auth, role(Role.SUPERADMIN), asyncRoute(async (req, res) => {
-  await db.organization.delete({
-    where: { id: String(req.params.id) }
+// Añadir un barbero autorizado a una barbería existente
+app.post('/api/superadmin/organizations/:id/barbers', auth, role(Role.SUPERADMIN), asyncRoute(async (req, res) => {
+  const v = z.object({
+    name: z.string().min(2),
+    phone: z.string().min(7),
+    priority: z.number().int().default(1)
+  }).parse(req.body);
+
+  const cleanPhone = v.phone.replace(/[^0-9+]/g, '');
+  const orgId = String(req.params.id);
+
+  const allowed = await db.allowedBarber.upsert({
+    where: { organizationId_phone: { organizationId: orgId, phone: cleanPhone } },
+    update: { name: v.name, priority: v.priority },
+    create: {
+      organizationId: orgId,
+      name: v.name,
+      phone: cleanPhone,
+      priority: v.priority
+    }
   });
+
+  // Si ya existía el barbero en Barber, actualizarle la jerarquía
+  const existingUser = await db.user.findFirst({
+    where: { organizationId: orgId, phone: cleanPhone },
+    include: { barber: true }
+  });
+  if (existingUser?.barber) {
+    await db.barber.update({
+      where: { id: existingUser.barber.id },
+      data: { priority: v.priority, displayName: v.name }
+    });
+  }
+
+  res.status(201).json({ success: true, data: allowed });
+}));
+
+app.delete('/api/superadmin/organizations/:id/barbers/:barberId', auth, role(Role.SUPERADMIN), asyncRoute(async (req, res) => {
+  const barberId = String(req.params.barberId);
+  await db.allowedBarber.deleteMany({ where: { id: barberId } });
   res.json({ success: true });
 }));
 

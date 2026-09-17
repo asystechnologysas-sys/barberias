@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { X, CheckCircle2, LogOut, Crown, AlertCircle, RefreshCw, Sparkles, Calendar as CalIcon, ShieldAlert } from 'lucide-react';
+import { X, CheckCircle2, LogOut, Crown, AlertCircle, RefreshCw, Sparkles, Calendar as CalIcon, ShieldAlert, Scissors, User } from 'lucide-react';
 import { api } from '../api';
 
 export default function PublicBooking() {
@@ -10,7 +10,9 @@ export default function PublicBooking() {
   const [org, setOrg] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selectedService, setSelectedService] = useState<any>(null);
-  const [selectedBarber, setSelectedBarber] = useState<string>('');
+  
+  // Barber selection: '' or 'any' = Cualquier barbero disponible
+  const [selectedBarber, setSelectedBarber] = useState<string>('any');
   
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedTime, setSelectedTime] = useState<string>('');
@@ -19,19 +21,14 @@ export default function PublicBooking() {
   const [freeHours, setFreeHours] = useState<string[]>([]);
   const [loadingHours, setLoadingHours] = useState(false);
 
-  // Mapa de estado real idéntico al barbero
+  // Mapa de estado sincronizado
   const [dayStatusMap, setDayStatusMap] = useState<{
     [dateStr: string]: { status: string; statusText: string; isFull: boolean; isClosed: boolean; freeCount: number };
   }>({});
 
-  // Citas futuras del cliente
   const [myUpcomingAppointments, setMyUpcomingAppointments] = useState<any[]>([]);
-
-  // Modo reprogramación VIP
   const [isReschedulingVip, setIsReschedulingVip] = useState(false);
   const [myVipData, setMyVipData] = useState<any>(null);
-
-  // Modal de alertas ASYS
   const [alertModal, setAlertModal] = useState<{ open: boolean; title: string; message: string; type: 'info' | 'success' | 'error' } | null>(null);
 
   const token = localStorage.getItem('asys_token');
@@ -50,7 +47,6 @@ export default function PublicBooking() {
       .then(data => {
         setOrg(data);
         if (data.services?.length && !selectedService) setSelectedService(data.services[0]);
-        if (data.barbers?.length && !selectedBarber) setSelectedBarber(data.barbers[0].id);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -96,7 +92,7 @@ export default function PublicBooking() {
     };
   });
 
-  // CONSULTA Y ACTUALIZACIÓN EN TIEMPO REAL CON SEMÁFORO DEL BARBERO
+  // DISPONIBILIDAD SEGÚN BARBERO SELECCIONADO ("Cualquiera" o uno en específico)
   const refreshAvailability = useCallback(async () => {
     if (!org) return;
     const activeDays = currentMonthDays.filter(d => d.inRange);
@@ -107,7 +103,7 @@ export default function PublicBooking() {
     await Promise.all(
       activeDays.map(async (d) => {
         try {
-          const res = await api.get(`/api/public/${slug}/availability?date=${d.dateStr}`);
+          const res = await api.get(`/api/public/${slug}/availability?date=${d.dateStr}&barberId=${selectedBarber || ''}`);
           
           if (res && typeof res === 'object' && !Array.isArray(res)) {
             const slots = res.slots || [];
@@ -148,7 +144,7 @@ export default function PublicBooking() {
     );
 
     setDayStatusMap(newStatusMap);
-  }, [org, slug]);
+  }, [org, slug, selectedBarber]);
 
   useEffect(() => {
     refreshAvailability();
@@ -170,11 +166,11 @@ export default function PublicBooking() {
 
     const dayInfo = dayStatusMap[day.dateStr];
     if (dayInfo?.isClosed) {
-      showAlert('Día Cerrado', 'Este día la barbería se encuentra cerrada.', 'info');
+      showAlert('Día Cerrado', 'Este día no hay atención.', 'info');
       return;
     }
     if (dayInfo?.isFull) {
-      showAlert('Día Completo', 'No quedan cupos disponibles para esta fecha. Por favor selecciona otro día.', 'info');
+      showAlert('Día Completo', 'No quedan cupos disponibles para esta fecha. Elige otro día.', 'info');
       return;
     }
 
@@ -228,7 +224,7 @@ export default function PublicBooking() {
         setIsReschedulingVip(false);
         showAlert(
           '¡Turno VIP Modificado!',
-          `Tu turno habitual del ${weekdayNames[myVipData.weekday]} ha sido liberado para esta semana. Tu nuevo turno es el ${selectedDate} a las ${selectedTime}.`,
+          `Tu turno habitual del ${weekdayNames[myVipData.weekday]} ha sido liberado. Tu nuevo turno es el ${selectedDate} a las ${selectedTime}.`,
           'success'
         );
         refreshAvailability();
@@ -239,12 +235,18 @@ export default function PublicBooking() {
     } else {
       try {
         const startsAt = new Date(`${selectedDate}T${selectedTime}:00-05:00`);
-        await api.post('/api/appointments', {
+        const res = await api.post('/api/appointments', {
           serviceId: selectedService.id,
-          barberId: selectedBarber || undefined,
+          barberId: selectedBarber === 'any' ? undefined : selectedBarber,
           startsAt
         });
-        showAlert('¡Cita Confirmada!', `Tu turno quedó reservado para el ${selectedDate} a las ${selectedTime}.`, 'success');
+
+        const assignedName = res?.barber?.displayName || 'Asignado';
+        showAlert(
+          '¡Cita Confirmada!',
+          `Tu turno quedó reservado para el ${selectedDate} a las ${selectedTime}. Barbero asignado: ${assignedName}.`,
+          'success'
+        );
         refreshAvailability();
         loadOrgData();
       } catch (err: any) {
@@ -271,17 +273,10 @@ export default function PublicBooking() {
     navigate(`/login/${slug}`);
   };
 
-  // 1. ESTADO DE CARGA
-  if (loading) {
-    return <div style={{ padding: 100, textAlign: 'center', color: '#64748b' }}>Cargando barbería...</div>;
-  }
+  if (loading) return <div style={{ padding: 100, textAlign: 'center', color: '#64748b' }}>Cargando barbería...</div>;
+  if (!org) return <div style={{ padding: 100, textAlign: 'center', color: '#ef4444' }}>Barbería no disponible.</div>;
 
-  // 2. SI LA BARBERÍA NO EXISTE
-  if (!org) {
-    return <div style={{ padding: 100, textAlign: 'center', color: '#ef4444' }}>Barbería no disponible.</div>;
-  }
-
-  // 3. SI LA BARBERÍA FUE PAUSADA POR EL SUPERADMIN (PANTALLA DE SUSPENSIÓN)
+  // PANTALLA DE SUSPENSIÓN
   if (org.isSuspended) {
     return (
       <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f8fafc', padding: 20 }}>
@@ -303,7 +298,6 @@ export default function PublicBooking() {
     );
   }
 
-  // 4. RENDER PRINCIPAL (BARBERÍA ACTIVA)
   return (
     <div className="client-page-wrap">
       
@@ -401,21 +395,54 @@ export default function PublicBooking() {
           </div>
         )}
 
-        {/* MODO REPROGRAMACIÓN VIP */}
-        {isReschedulingVip && (
-          <div style={{ background: '#eff6ff', border: '1.5px solid #93c5fd', borderRadius: 16, padding: '16px 22px', marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <RefreshCw size={24} color="#1554ff" className="animate-spin" />
-              <div>
-                <b style={{ color: '#1e3a8a', fontSize: 15, display: 'block' }}>Modo Reprogramación VIP Activo</b>
-                <span style={{ color: '#1d4ed8', fontSize: 13 }}>
-                  Selecciona en el calendario un día y hora disponible para mover tu turno fijo de esta semana. Tu hora habitual se liberará de inmediato.
-                </span>
-              </div>
+        {/* SELECTOR DE BARBERO (SI HAY MÁS DE 1) */}
+        {org.barbers?.length > 1 && (
+          <div style={{ background: '#ffffff', border: '1.5px solid #e2e8f0', borderRadius: 18, padding: '16px 20px', marginBottom: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <Scissors size={18} color="#1554ff" />
+              <b style={{ fontSize: 14, color: '#0b1020' }}>¿Tienes un barbero de preferencia?</b>
             </div>
-            <button onClick={() => setIsReschedulingVip(false)} className="btn-logout-modern">
-              Cancelar
-            </button>
+
+            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+              <button
+                type="button"
+                onClick={() => { setSelectedBarber('any'); setSelectedDate(''); setSelectedTime(''); }}
+                className="clean-tab-btn"
+                style={{
+                  background: selectedBarber === 'any' ? '#1554ff' : '#f8fafc',
+                  color: selectedBarber === 'any' ? '#ffffff' : '#0b1020',
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: 30,
+                  padding: '8px 18px',
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                  fontSize: 13
+                }}
+              >
+                ✨ Cualquiera (Mayor disponibilidad)
+              </button>
+
+              {org.barbers.map((b: any) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => { setSelectedBarber(b.id); setSelectedDate(''); setSelectedTime(''); }}
+                  className="clean-tab-btn"
+                  style={{
+                    background: selectedBarber === b.id ? '#1554ff' : '#f8fafc',
+                    color: selectedBarber === b.id ? '#ffffff' : '#0b1020',
+                    border: '1.5px solid #e2e8f0',
+                    borderRadius: 30,
+                    padding: '8px 18px',
+                    fontWeight: 700,
+                    whiteSpace: 'nowrap',
+                    fontSize: 13
+                  }}
+                >
+                  ✂️ {b.displayName}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -522,12 +549,17 @@ export default function PublicBooking() {
               </div>
 
               <div className="client-summary-row">
-                <span>Fecha Nueva</span>
+                <span>Barbero</span>
+                <b>{selectedBarber === 'any' ? '✨ Cualquiera disponible' : (org.barbers?.find((b: any) => b.id === selectedBarber)?.displayName || 'Asignado')}</b>
+              </div>
+
+              <div className="client-summary-row">
+                <span>Fecha</span>
                 <b>{selectedDate || 'Elige en el calendario'}</b>
               </div>
 
               <div className="client-summary-row">
-                <span>Hora Nueva</span>
+                <span>Hora</span>
                 <b>{selectedTime || 'Sin seleccionar'}</b>
               </div>
 
@@ -551,8 +583,8 @@ export default function PublicBooking() {
             </div>
 
             <div className="client-wa-card">
-              <h4>📱 Recordatorios por WhatsApp</h4>
-              <p>El sistema te notificará en tiempo real sobre confirmaciones o reprogramaciones de turno.</p>
+              <h4>📱 Notificaciones Inmediatas</h4>
+              <p>Tu barbero recibirá el agendamiento y podrás consultar tus citas desde este panel.</p>
             </div>
           </div>
 
