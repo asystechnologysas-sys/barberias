@@ -338,8 +338,7 @@ export default function BarberDashboard() {
             </button>
           </div>
         </div>
-
-        {/* PANEL DERECHO */}
+{/* PANEL DERECHO */}
         <div>
           {/* PESTAÑA 1: ALMANAQUE MÁSTER */}
           {activeTab === 'schedule' && (
@@ -609,9 +608,10 @@ export default function BarberDashboard() {
             </div>
           )}
 
-          {/* PESTAÑA 4: HORARIOS Y PRECIO DEL CORTE */}
+          {/* PESTAÑA 4: HORARIOS Y PRECIO DE LOS 3 SERVICIOS */}
           {activeTab === 'settings' && (
             <div>
+              {/* Horarios semanales por día */}
               <div className="client-calendar-card" style={{ marginBottom: 24 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                   <div>
@@ -693,40 +693,67 @@ export default function BarberDashboard() {
                 </div>
               </div>
 
-              {/* TARIFA DEL CORTE PRINCIPAL */}
-              {corteService && (
-                <div className="client-calendar-card">
-                  <span className="cal-eyebrow">TARIFA PRINCIPAL</span>
-                  <h2 style={{ fontFamily: 'Sora', fontSize: 22, marginBottom: 8 }}>Precio del Corte</h2>
-                  <p style={{ color: '#64748b', fontSize: 13, marginBottom: 20 }}>
-                    Define el valor del corte en pesos colombianos. Los clientes verán este precio actualizado de inmediato.
-                  </p>
+              {/* EDICIÓN DE LOS 3 SERVICIOS (Corte, Barba y Corte + Barba) */}
+              <div className="client-calendar-card">
+                <span className="cal-eyebrow">CATÁLOGO Y TARIFAS</span>
+                <h2 style={{ fontFamily: 'Sora', fontSize: 22, marginBottom: 8 }}>Precios de los Servicios</h2>
+                <p style={{ color: '#64748b', fontSize: 13, marginBottom: 20 }}>
+                  Define el valor en pesos colombianos para cada uno de tus servicios. Los clientes verán los precios actualizados de inmediato.
+                </p>
 
-                  <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', maxWidth: 460 }}>
-                    <div style={{ flex: 1 }}>
-                      <label className="input-label">Precio del Corte (COP)</label>
-                      <input
-                        type="number"
-                        defaultValue={corteService.price}
-                        id={`price-${corteService.id}`}
-                        className="clean-input"
-                        placeholder="Ej. 25000"
-                      />
-                    </div>
-
-                    <button
-                      onClick={() => {
-                        const newPrice = Number((document.getElementById(`price-${corteService.id}`) as HTMLInputElement).value);
-                        handleUpdateCortePrice(corteService.id, newPrice);
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {services.map(svc => (
+                    <div
+                      key={svc.id}
+                      style={{
+                        background: '#ffffff',
+                        border: '1.5px solid #e2e8f0',
+                        borderRadius: 14,
+                        padding: '16px 20px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: 12
                       }}
-                      className="btn-clean-submit"
-                      style={{ width: 'auto', padding: '13px 24px' }}
                     >
-                      Actualizar Precio
-                    </button>
-                  </div>
+                      <div>
+                        <b style={{ fontSize: 16, color: '#0b1020', display: 'block' }}>{svc.name}</b>
+                        <span style={{ fontSize: 12, color: '#64748b' }}>Duración: {svc.durationMinutes || 45} mins</span>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                        <div>
+                          <span style={{ fontSize: 11, color: '#64748b', display: 'block' }}>Precio (COP)</span>
+                          <input
+                            type="number"
+                            defaultValue={svc.price}
+                            id={`price-${svc.id}`}
+                            className="clean-input"
+                            style={{ width: 140, padding: '8px 12px', fontSize: 14, fontWeight: 700 }}
+                          />
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            const newPrice = Number((document.getElementById(`price-${svc.id}`) as HTMLInputElement).value);
+                            api.patch(`/api/services/${svc.id}`, { price: newPrice })
+                              .then(() => {
+                                showAlert('Tarifa Guardada', `El servicio "${svc.name}" ahora cuesta $${newPrice.toLocaleString('es-CO')} COP.`);
+                                loadData();
+                              })
+                              .catch((err) => showAlert('Error', err.message || 'No se pudo actualizar', 'error'));
+                          }}
+                          className="btn-clean-submit"
+                          style={{ width: 'auto', padding: '10px 18px', marginTop: 16 }}
+                        >
+                          Guardar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              )}
+              </div>
             </div>
           )}
 
