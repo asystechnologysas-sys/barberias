@@ -6,21 +6,28 @@ import { api } from '../api';
 export default function PublicBooking() {
   const { slug = 'asysbarber' } = useParams();
   const navigate = useNavigate();
-  
+
+  // Estados de datos
   const [org, setOrg] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selectedService, setSelectedService] = useState<any>(null);
   const [selectedBarber, setSelectedBarber] = useState<string>('');
-  
+
+  // Fechas y selección
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedTime, setSelectedTime] = useState<string>('');
-  
   const [showHoursModal, setShowHoursModal] = useState(false);
-  const [freeHours, setFreeHours] = useState<string[]>([]);
-  const [loadingHours, setLoadingHours] = useState(false);
 
-  // Mapa de estado real de cada día de los 7 activos: { "2026-09-21": { isFull: true, isClosed: false } }
-  const [dayStatusMap, setDayStatusMap] = useState<{ [dateStr: string]: { isFull: boolean; isClosed: boolean } }>({});
+  // Mismos datos que usa el barbero para el cálculo
+  const [appointments, setAppointments] = useState<any[]>([]);
+  const [blocks, setBlocks] = useState<any[]>([]);
+  const [vips, setVips] = useState<any[]>([]);
+  const [weeklySchedules, setWeeklySchedules] = useState<any[]>([]);
+
+  // Sesión del cliente
+  const token = localStorage.getItem('asys_token');
+  const userStr = localStorage.getItem('asys_user');
+  const currentUser = userStr ? JSON.parse(userStr) : null;
 
   // Citas futuras del cliente
   const [myUpcomingAppointments, setMyUpcomingAppointments] = useState<any[]>([]);
@@ -29,33 +36,41 @@ export default function PublicBooking() {
   const [isReschedulingVip, setIsReschedulingVip] = useState(false);
   const [myVipData, setMyVipData] = useState<any>(null);
 
-  // Modal de alertas ASYS
+  // Modal de alertas ASYS (Cero alertas nativas)
   const [alertModal, setAlertModal] = useState<{ open: boolean; title: string; message: string; type: 'info' | 'success' | 'error' } | null>(null);
 
-  const token = localStorage.getItem('asys_token');
-  const userStr = localStorage.getItem('asys_user');
-  const currentUser = userStr ? JSON.parse(userStr) : null;
-
-  // Incluye la hora 13:00 (1:00 PM)
-  const masterDayHours = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
+  const masterHoursAll = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
   const weekdayNames = ['Domingos', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábados'];
 
   const showAlert = (title: string, message: string, type: 'info' | 'success' | 'error' = 'info') => {
     setAlertModal({ open: true, title, message, type });
   };
 
-  useEffect(() => {
-    // 1. Cargar datos de la barbería
-    api.get(`/api/public/${slug}`)
-      .then(data => {
-        setOrg(data);
-        if (data.services?.length) setSelectedService(data.services[0]);
-        if (data.barbers?.length) setSelectedBarber(data.barbers[0].id);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+  // Cargar toda la matriz de disponibilidad en tiempo real
+  const loadScheduleMatrix = async () => {
+    try {
+      const res = await api.get(`/api/public/${slug}/schedule-data`);
+      if (res) {
+        setOrg(res.org);
+        setAppointments(res.appointments || []);
+        setBlocks(res.blocks || []);
+        setVips(res.vips || []);
+        setWeeklySchedules(res.schedules || []);
 
-    // 2. Si está autenticado, cargar su horario VIP real y sus citas futuras
+        if (res.services?.length) {
+          setSelectedService(res.services[0]);
+        }
+      }
+    } catch (err) {
+      console.error('Error cargando datos de agenda:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadScheduleMatrix();
+
     if (token) {
       api.get('/api/vip/my-schedule')
         .then(vip => setMyVipData(vip))
@@ -71,92 +86,114 @@ export default function PublicBooking() {
     }
   }, [slug, token]);
 
-  // CÁLCULO DEL MES CON ALINEACIÓN DOMINGO A SÁBADO
+  const getHour = (iso: string) => {
+    const d = new Date(iso);
+    return d.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hour12: false });
+  };
+
+  // Horas laborales según la configuración del barbero para ese día
+  const getDayWorkingSlots = (weekday: number) => {
+    const sched = weeklySchedules.find(s => s.weekday === weekday);
+    if (!sched || sched.closed) return [];
+
+    const openH = Number(sched.openTime.slice(0, 2));
+    const closeH = Number(sched.closeTime.slice(0, 2));
+
+    return masterHoursAll.filter(h => {
+      const slotH = Number(h.slice(0, 2));
+      return slotH >= openH && slotH < closeH;
+    });
+  };
+
+  // CALENDARIO DOMINGO A SÁBADO
   const today = new Date();
   const year = today.getFullYear();
   const month = today.getMonth();
   const firstDayIndex = new Date(year, month, 1).getDay(); // 0: Dom, 1: Lun...
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-  const emptyPaddingDays = Array.from({ length: firstDayIndex }, (_, i) => i);
+  const emptyOffset = Array.from({ length: firstDayIndex }, (_, i) => i);
 
-  const currentMonthDays = Array.from({ length: daysInMonth }, (_, i) => {
+  // CÁLCULO IDÉNTICO AL DEL BARBERO PARA EL SEMÁFORO
+  const monthDays = Array.from({ length: daysInMonth }, (_, i) => {
     const d = new Date(year, month, i + 1);
     const dateStr = d.toISOString().split('T')[0];
+    const dayOfWeek = d.getDay();
     const diffDays = Math.floor((d.getTime() - new Date(today.toDateString()).getTime()) / (1000 * 60 * 60 * 24));
     
-    // Solo son activos los días entre hoy y los próximos 7 días
+    // Solo se puede reservar entre hoy y los próximos 7 días
     const inRange = diffDays >= 0 && diffDays <= 7;
+
+    // 1. Revisar si está cerrado por bloqueo o por horario semanal
+    const isFullDayClosed = blocks.some(b => {
+      const bStart = new Date(b.startsAt);
+      const bEnd = new Date(b.endsAt);
+      return bStart <= new Date(`${dateStr}T00:00:00-05:00`) && bEnd >= new Date(`${dateStr}T23:59:59-05:00`);
+    });
+    const sched = weeklySchedules.find(s => s.weekday === dayOfWeek);
+    const isDayClosed = isFullDayClosed || !!sched?.closed;
+
+    // 2. Horas laborables del día
+    const workingSlots = getDayWorkingSlots(dayOfWeek);
+    const totalSlots = workingSlots.length;
+
+    // 3. Contar horas ocupadas reales
+    const dayApts = appointments.filter(a => {
+      const aDate = new Date(a.startsAt).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+      return aDate === dateStr && a.status === 'CONFIRMED';
+    });
+
+    const dayBlocks = blocks.filter(b => {
+      const bDate = new Date(b.startsAt).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+      return bDate === dateStr && !isFullDayClosed;
+    });
+
+    const dayVips = vips.filter(v => {
+      if (v.weekday !== dayOfWeek) return false;
+      const isSkipped = v.exceptions?.some((e: any) => {
+        const exDate = new Date(e.date).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+        return exDate === dateStr;
+      });
+      return !isSkipped;
+    });
+
+    const occupiedCount = dayApts.length + dayBlocks.length + dayVips.length;
+    const freeSlotsCount = Math.max(0, totalSlots - occupiedCount);
+
+    // Lógica idéntica de colores
+    let status = 'green';
+    let statusText = `${freeSlotsCount} libres ●`;
+
+    if (isDayClosed) {
+      status = 'closed';
+      statusText = 'Cerrado';
+    } else if (totalSlots === 0 || freeSlotsCount === 0) {
+      status = 'full';
+      statusText = 'Lleno ●';
+    } else if (freeSlotsCount <= 2 || (freeSlotsCount / totalSlots) <= 0.5) {
+      status = 'yellow';
+      statusText = `${freeSlotsCount} libres ●`;
+    } else {
+      status = 'green';
+      statusText = `${freeSlotsCount} libres ●`;
+    }
 
     return {
       dayNum: i + 1,
       dateStr,
-      inRange
+      inRange,
+      isDayClosed,
+      isFull: status === 'full',
+      status,
+      statusText
     };
   });
 
-  // CONSULTA REAL DE DISPONIBILIDAD PARA PINTAR DE ROJO SOLO LOS DÍAS VERDADERAMENTE LLENOS O CERRADOS
-  useEffect(() => {
-    if (!org) return;
-
-    const checkActiveDays = async () => {
-      const activeDays = currentMonthDays.filter(d => d.inRange);
-      const newStatusMap: { [key: string]: { isFull: boolean; isClosed: boolean } } = {};
-
-      await Promise.all(
-        activeDays.map(async (d) => {
-          try {
-            const res = await api.get(`/api/public/${slug}/availability?date=${d.dateStr}`);
-            const slots = Array.isArray(res) ? res : (res?.data || []);
-            const isClosed = !!res?.isClosed;
-            const isFull = isClosed || slots.length === 0;
-
-            newStatusMap[d.dateStr] = { isFull, isClosed };
-          } catch {
-            newStatusMap[d.dateStr] = { isFull: false, isClosed: false };
-          }
-        })
-      );
-
-      setDayStatusMap(newStatusMap);
-    };
-
-    checkActiveDays();
-  }, [org]);
-
-  const normalizeHour = (rawTime: string) => {
-    if (!rawTime) return '';
-    if (rawTime.includes('T')) {
-      const d = new Date(rawTime);
-      const h = String(d.getHours()).padStart(2, '0');
-      const m = String(d.getMinutes()).padStart(2, '0');
-      return `${h}:${m}`;
-    }
-    return rawTime.slice(0, 5);
-  };
-
-  const handleDaySelect = async (day: any) => {
+  const handleDaySelect = (day: any) => {
     if (!day.inRange) return;
     setSelectedDate(day.dateStr);
     setSelectedTime('');
-    setLoadingHours(true);
     setShowHoursModal(true);
-
-    try {
-      const res = await api.get(`/api/public/${slug}/availability?date=${day.dateStr}&barberId=${selectedBarber || ''}`);
-      const slots = Array.isArray(res) ? res : (res?.data || []);
-      
-      if (res.isClosed || slots.length === 0) {
-        setFreeHours([]);
-      } else {
-        const parsed = slots.map((item: any) => normalizeHour(item.time));
-        setFreeHours(parsed);
-      }
-    } catch {
-      setFreeHours(masterDayHours);
-    } finally {
-      setLoadingHours(false);
-    }
   };
 
   const handlePickHour = (hour: string) => {
@@ -224,6 +261,11 @@ export default function PublicBooking() {
     navigate('/login');
   };
 
+  // Horas del día seleccionado para el modal
+  const selectedDateDayOfWeek = selectedDate ? new Date(`${selectedDate}T12:00:00-05:00`).getDay() : 0;
+  const currentWorkingSlots = getDayWorkingSlots(selectedDateDayOfWeek);
+  const selectedDayObj = monthDays.find(d => d.dateStr === selectedDate);
+
   if (loading) return <div style={{ padding: 100, textAlign: 'center', color: '#64748b' }}>Cargando barbería...</div>;
   if (!org) return <div style={{ padding: 100, textAlign: 'center', color: '#ef4444' }}>Barbería no disponible.</div>;
 
@@ -267,7 +309,7 @@ export default function PublicBooking() {
         </div>
       </header>
 
-      {/* 2. CUERPO PRINCIPAL */}
+      {/* 2. CUERPO */}
       <div className="client-content-container">
         
         {/* BANNER VIP */}
@@ -342,7 +384,7 @@ export default function PublicBooking() {
           </div>
         )}
 
-        {/* SELECTOR DE SERVICIOS */}
+        {/* SELECTOR DE SERVICIOS CON PRECIOS EN VIVO */}
         {org.services?.length > 0 && (
           <div style={{ display: 'flex', gap: 8, marginBottom: 20, overflowX: 'auto', paddingBottom: 6 }}>
             {org.services.map((svc: any) => (
@@ -369,7 +411,7 @@ export default function PublicBooking() {
 
         <div className="client-grid">
           
-          {/* Calendario con DOMINGO a SÁBADO */}
+          {/* Calendario con DOMINGO a SÁBADO y SEMÁFORO REAL */}
           <div className="client-calendar-card">
             <div className="cal-header-bar">
               <div>
@@ -384,16 +426,14 @@ export default function PublicBooking() {
             </div>
 
             <div className="cal-days-grid">
-              {/* Celdas vacías al inicio */}
-              {emptyPaddingDays.map((_, i) => (
-                <div key={`empty-${i}`} className="cal-cell cell-disabled" style={{ opacity: 0.15 }}></div>
+              {emptyOffset.map((_, i) => (
+                <div key={`offset-${i}`} className="cal-cell cell-disabled" style={{ opacity: 0.15, minHeight: 64 }}></div>
               ))}
 
-              {/* RENDERIZADO ESTRICTO DE CADA DÍA */}
-              {currentMonthDays.map((d, index) => {
+              {monthDays.map((d, index) => {
                 const isSelected = selectedDate === d.dateStr;
 
-                // 1. REGLA CLAVE: Si está fuera de los 7 días (pasados o futuros lejanos), SIEMPRE GRIS E INACTIVO
+                // 1. Fuera de los 7 días (pasados o futuros): SIEMPRE GRIS
                 if (!d.inRange) {
                   return (
                     <div key={index} className="cal-cell cell-disabled">
@@ -405,54 +445,20 @@ export default function PublicBooking() {
                   );
                 }
 
-                // 2. Para los 7 días activos, verificar si la base de datos dice que está lleno o cerrado
-                const statusInfo = dayStatusMap[d.dateStr];
-                const isClosed = statusInfo?.isClosed;
-                const isFull = statusInfo?.isFull;
+                // 2. Semáforo real con clases idénticas al barbero
+                let badgeClass = 'status-green';
+                if (d.status === 'closed') badgeClass = 'status-red';
+                if (d.status === 'full') badgeClass = 'status-red';
+                if (d.status === 'yellow') badgeClass = 'status-yellow';
 
-                // SI ESTÁ CERRADO POR EL BARBERO: ROJO CON TEXTO "Cerrado"
-                if (isClosed) {
-                  return (
-                    <div
-                      key={index}
-                      onClick={() => handleDaySelect(d)}
-                      className={`cal-cell status-red ${isSelected ? 'cell-selected' : ''}`}
-                    >
-                      <div className="cal-cell-num">{d.dayNum}</div>
-                      <div className="cal-cell-status">
-                        <span>Cerrado</span>
-                      </div>
-                    </div>
-                  );
-                }
-
-                // SI ESTÁ LLENO POR CITAS: ROJO CON TEXTO "Lleno ●"
-                if (isFull) {
-                  return (
-                    <div
-                      key={index}
-                      onClick={() => handleDaySelect(d)}
-                      className={`cal-cell status-red ${isSelected ? 'cell-selected' : ''}`}
-                    >
-                      <div className="cal-cell-num">{d.dayNum}</div>
-                      <div className="cal-cell-status">
-                        <span>Lleno ●</span>
-                      </div>
-                    </div>
-                  );
-                }
-
-                // SI TIENE HORAS LIBRES: VERDE CON TEXTO "● Libre"
                 return (
                   <div
                     key={index}
                     onClick={() => handleDaySelect(d)}
-                    className={`cal-cell status-green ${isSelected ? 'cell-selected' : ''}`}
+                    className={`cal-cell ${badgeClass} ${isSelected ? 'cell-selected' : ''}`}
                   >
                     <div className="cal-cell-num">{d.dayNum}</div>
-                    <div className="cal-cell-status">
-                      <span>● Libre</span>
-                    </div>
+                    <div className="cal-cell-status">{d.statusText}</div>
                   </div>
                 );
               })}
@@ -528,24 +534,47 @@ export default function PublicBooking() {
               </button>
             </div>
 
-            {loadingHours ? (
-              <div style={{ padding: 30, textAlign: 'center', color: '#64748b' }}>Consultando turnos...</div>
-            ) : freeHours.length === 0 ? (
-              <div style={{ padding: 40, textAlign: 'center', color: '#ef4444', fontWeight: 800 }}>
-                Este día se encuentra cerrado o totalmente lleno.
+            {selectedDayObj?.isDayClosed ? (
+              <div style={{ padding: 40, textAlign: 'center', color: '#dc2626', fontWeight: 800 }}>
+                Este día se encuentra cerrado.
+              </div>
+            ) : selectedDayObj?.isFull ? (
+              <div style={{ padding: 40, textAlign: 'center', color: '#dc2626', fontWeight: 800 }}>
+                Este día se encuentra totalmente lleno. No hay turnos libres.
               </div>
             ) : (
               <div className="modal-hours-grid">
-                {masterDayHours.map((hour) => {
-                  const isAvailable = freeHours.includes(hour);
+                {currentWorkingSlots.map((hour) => {
+                  // Comprobar si esta hora exacta está ocupada por cita, bloqueo o VIP
+                  const isBooked = appointments.some(a => {
+                    const aDate = new Date(a.startsAt).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+                    return aDate === selectedDate && getHour(a.startsAt) === hour && a.status === 'CONFIRMED';
+                  });
+
+                  const isBlocked = blocks.some(b => {
+                    const bDate = new Date(b.startsAt).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+                    return bDate === selectedDate && getHour(b.startsAt) === hour;
+                  });
+
+                  const isVip = vips.some(v => {
+                    if (v.weekday !== selectedDateDayOfWeek || v.time !== hour) return false;
+                    const isSkipped = v.exceptions?.some((e: any) => {
+                      const exDate = new Date(e.date).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+                      return exDate === selectedDate;
+                    });
+                    return !isSkipped;
+                  });
+
+                  const isOccupied = isBooked || isBlocked || isVip;
+
                   return (
                     <button
                       key={hour}
-                      disabled={!isAvailable}
+                      disabled={isOccupied}
                       onClick={() => handlePickHour(hour)}
                       className="btn-hour-slot"
                     >
-                      {hour} {isAvailable ? '' : '✕'}
+                      {hour} {isOccupied ? '✕' : ''}
                     </button>
                   );
                 })}

@@ -81,6 +81,55 @@ app.get('/api/public/:slug', asyncRoute(async (req, res) => {
   res.json({ success: true, data: org });
 }));
 
+// Datos completos para sincronizar el almanaque del cliente en tiempo real
+app.get('/api/public/:slug/schedule-data', asyncRoute(async (req, res) => {
+  const org = await db.organization.findUnique({ where: { slug: String(req.params.slug) } });
+  if (!org) return fail(res, 404, 'ORGANIZATION_NOT_FOUND', 'Barbería no encontrada.');
+
+  const now = new Date();
+  const pastWindow = new Date(now.getTime() - 2 * 24 * 3600 * 1000);
+  const futureWindow = new Date(now.getTime() + 14 * 24 * 3600 * 1000);
+
+  const [appointments, blocks, vips, schedules, services] = await Promise.all([
+    db.appointment.findMany({
+      where: {
+        organizationId: org.id,
+        status: AppointmentStatus.CONFIRMED,
+        startsAt: { gte: pastWindow, lte: futureWindow }
+      },
+      select: { startsAt: true, endsAt: true, status: true }
+    }),
+    db.blockedSlot.findMany({
+      where: {
+        organizationId: org.id,
+        startsAt: { gte: pastWindow, lte: futureWindow }
+      }
+    }),
+    db.vipSchedule.findMany({
+      where: { organizationId: org.id, active: true },
+      include: { exceptions: true }
+    }),
+    db.daySchedule.findMany({
+      where: { organizationId: org.id }
+    }),
+    db.service.findMany({
+      where: { organizationId: org.id, active: true }
+    })
+  ]);
+
+  res.json({
+    success: true,
+    data: {
+      appointments,
+      blocks,
+      vips,
+      schedules,
+      services,
+      org: { id: org.id, name: org.name, slug: org.slug, logoUrl: org.logoUrl }
+    }
+  });
+}));
+
 // DISPONIBILIDAD REAL BASADA EN LOS HORARIOS CONFIGURADOS POR EL BARBERO
 app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
   const dateStr = String(req.query.date);
