@@ -33,14 +33,14 @@ export default function BarberDashboard() {
   const [confirmModal, setConfirmModal] = useState<{ open: boolean; id: string; name: string } | null>(null);
   const [blockDayModal, setBlockDayModal] = useState(false);
 
-  // Modal Flotante de Notificaciones ASYS
+  // Alerta ASYS flotante
   const [alertModal, setAlertModal] = useState<{ open: boolean; title: string; message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const showAlert = (title: string, message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setAlertModal({ open: true, title, message, type });
   };
 
-  const masterHours = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
+  const masterHoursAll = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
   const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
   const loadData = async () => {
@@ -85,6 +85,20 @@ export default function BarberDashboard() {
     return d.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hour12: false });
   };
 
+  // Generación de slots dinámicos según el horario de ese día de la semana
+  const getDayWorkingSlots = (weekday: number) => {
+    const sched = weeklySchedules.find(s => s.weekday === weekday);
+    if (!sched || sched.closed) return [];
+    
+    const openH = Number(sched.openTime.slice(0, 2));
+    const closeH = Number(sched.closeTime.slice(0, 2));
+    
+    return masterHoursAll.filter(h => {
+      const slotH = Number(h.slice(0, 2));
+      return slotH >= openH && slotH < closeH;
+    });
+  };
+
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
   const firstDayOfMonth = new Date(year, month, 1).getDay();
@@ -92,31 +106,59 @@ export default function BarberDashboard() {
 
   const emptyOffset = Array.from({ length: firstDayOfMonth }, (_, i) => i);
 
+  // CÁLCULO REAL DEL SEMÁFORO EN EL ALMANAQUE
   const monthDays = Array.from({ length: daysInMonth }, (_, i) => {
     const d = new Date(year, month, i + 1);
     const dateStr = d.toISOString().split('T')[0];
     const dayOfWeek = d.getDay();
 
+    // 1. Verificar si está cerrado
     const isFullDayClosed = blocks.some(b => {
       const bStart = new Date(b.startsAt);
       const bEnd = new Date(b.endsAt);
       return bStart <= new Date(`${dateStr}T00:00:00-05:00`) && bEnd >= new Date(`${dateStr}T23:59:59-05:00`);
     });
+    const sched = weeklySchedules.find(s => s.weekday === dayOfWeek);
+    const isDayClosed = isFullDayClosed || !!sched?.closed;
 
-    const isRecurringClosed = weeklySchedules.find(s => s.weekday === dayOfWeek)?.closed;
+    // 2. Calcular slots totales vs libres
+    const workingSlots = getDayWorkingSlots(dayOfWeek);
+    const totalSlots = workingSlots.length;
 
     const dayApts = appointments.filter(a => a.startsAt.startsWith(dateStr) && a.status === 'CONFIRMED');
+    const dayBlocks = blocks.filter(b => b.startsAt.startsWith(dateStr) && !isFullDayClosed);
     const dayVips = vips.filter(v => {
       if (v.weekday !== dayOfWeek) return false;
       const isSkipped = v.exceptions?.some((e: any) => new Date(e.date).toISOString().split('T')[0] === dateStr);
       return !isSkipped;
     });
 
+    const occupiedSlotsCount = dayApts.length + dayBlocks.length + dayVips.length;
+    const freeSlotsCount = Math.max(0, totalSlots - occupiedSlotsCount);
+
+    // Lógica del semáforo
+    let status = 'green';
+    let statusText = 'Disponible ●';
+
+    if (isDayClosed) {
+      status = 'closed';
+      statusText = 'Cerrado';
+    } else if (totalSlots === 0 || freeSlotsCount === 0) {
+      status = 'full';
+      statusText = 'Lleno ●';
+    } else if (freeSlotsCount <= 2 || (freeSlotsCount / totalSlots) <= 0.5) {
+      status = 'yellow';
+      statusText = `${freeSlotsCount} libres ●`;
+    } else {
+      status = 'green';
+      statusText = `${freeSlotsCount} libres ●`;
+    }
+
     return {
       dayNum: i + 1,
       dateStr,
-      isClosed: isFullDayClosed || isRecurringClosed,
-      totalOccupied: dayApts.length + dayVips.length
+      status,
+      statusText
     };
   });
 
@@ -126,7 +168,7 @@ export default function BarberDashboard() {
       const endsAt = new Date(startsAt.getTime() + 60 * 60 * 1000);
       await api.post('/api/blocks', { startsAt, endsAt, reason: blockReason });
       setBlockModalOpen(false);
-      showAlert('Hora Bloqueada', `La franja de las ${slotToBlock} quedó bloqueada para el ${selectedDate}.`);
+      showAlert('Hora Bloqueada', `La franja de las ${slotToBlock} quedó bloqueada.`);
       loadData();
     } catch (err: any) {
       showAlert('Error al bloquear', err.message || 'No se pudo bloquear la hora', 'error');
@@ -137,7 +179,7 @@ export default function BarberDashboard() {
     try {
       await api.post('/api/blocks/day', { dateStr: selectedDate, reason: 'Día Cerrado' });
       setBlockDayModal(false);
-      showAlert('Día Cerrado', `El día ${selectedDate} fue cerrado completamente para reservas.`);
+      showAlert('Día Cerrado', `El día ${selectedDate} fue cerrado para reservas.`);
       loadData();
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo cerrar el día', 'error');
@@ -188,14 +230,14 @@ export default function BarberDashboard() {
       showAlert('Cliente VIP Asignado', 'El turno fijo semanal quedó registrado con éxito.');
       loadData();
     } catch (err: any) {
-      showAlert('Error al asignar VIP', err.message || 'No se pudo registrar', 'error');
+      showAlert('Horario No Disponible', err.message || 'Este horario ya está ocupado por otro VIP.', 'error');
     }
   };
 
   const handleSaveSchedules = async () => {
     try {
       await api.put('/api/schedules', { schedules: weeklySchedules });
-      showAlert('¡Horarios Guardados!', 'La configuración semanal de apertura y cierre fue actualizada en la base de datos.');
+      showAlert('¡Horarios Guardados!', 'La configuración semanal de apertura y cierre fue actualizada.');
       loadData();
     } catch (err: any) {
       showAlert('Error al guardar', err.message || 'No se pudo guardar la configuración', 'error');
@@ -219,13 +261,20 @@ export default function BarberDashboard() {
     navigate('/login');
   };
 
+  const selectedDateDayOfWeek = new Date(`${selectedDate}T12:00:00-05:00`).getDay();
+  const currentDayWorkingSlots = getDayWorkingSlots(selectedDateDayOfWeek);
+
   const isCurrentSelectedDayClosed = blocks.some(b => {
     const bStart = new Date(b.startsAt);
     const bEnd = new Date(b.endsAt);
     return bStart <= new Date(`${selectedDate}T00:00:00-05:00`) && bEnd >= new Date(`${selectedDate}T23:59:59-05:00`);
-  });
+  }) || !!weeklySchedules.find(s => s.weekday === selectedDateDayOfWeek)?.closed;
 
-  const selectedDateDayOfWeek = new Date(`${selectedDate}T12:00:00-05:00`).getDay();
+  // Horas ya ocupadas por VIPs en el día que se está seleccionando en el modal
+  const takenVipHoursInSelectedDay = vips
+    .filter(v => v.weekday === Number(newVipWeekday))
+    .map(v => v.time);
+
   const corteService = services.find(s => s.name.toLowerCase().includes('corte')) || services[0];
 
   return (
@@ -312,6 +361,7 @@ export default function BarberDashboard() {
                 </div>
               </div>
 
+              {/* CALENDARIO CON SEMÁFORO EXACTO */}
               <div className="cal-week-labels">
                 <span>DOM</span><span>LUN</span><span>MAR</span><span>MIE</span><span>JUE</span><span>VIE</span><span>SAB</span>
               </div>
@@ -321,24 +371,24 @@ export default function BarberDashboard() {
                   <div key={`offset-${i}`} className="cal-cell cell-disabled" style={{ opacity: 0.15, minHeight: 64 }}></div>
                 ))}
 
-                {monthDays.map(d => (
-                  <div
-                    key={d.dateStr}
-                    onClick={() => setSelectedDate(d.dateStr)}
-                    className={`cal-cell ${selectedDate === d.dateStr ? 'cell-selected' : ''}`}
-                    style={{
-                      minHeight: 64,
-                      textAlign: 'center',
-                      background: d.isClosed ? '#fef2f2' : undefined,
-                      borderColor: d.isClosed ? '#fecaca' : undefined
-                    }}
-                  >
-                    <div className="cal-cell-num">{d.dayNum}</div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: d.isClosed ? '#dc2626' : d.totalOccupied > 0 ? '#1554ff' : '#10b981' }}>
-                      {d.isClosed ? 'Cerrado' : d.totalOccupied > 0 ? `${d.totalOccupied} ocupado(s)` : 'Libre'}
+                {monthDays.map(d => {
+                  let badgeClass = 'status-green';
+                  if (d.status === 'closed') badgeClass = 'status-red';
+                  if (d.status === 'full') badgeClass = 'status-red';
+                  if (d.status === 'yellow') badgeClass = 'status-yellow';
+
+                  return (
+                    <div
+                      key={d.dateStr}
+                      onClick={() => setSelectedDate(d.dateStr)}
+                      className={`cal-cell ${badgeClass} ${selectedDate === d.dateStr ? 'cell-selected' : ''}`}
+                      style={{ minHeight: 64, textAlign: 'center' }}
+                    >
+                      <div className="cal-cell-num">{d.dayNum}</div>
+                      <div className="cal-cell-status">{d.statusText}</div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div style={{ background: '#f8fafc', padding: '14px 18px', borderRadius: 14, border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -355,83 +405,96 @@ export default function BarberDashboard() {
                 )}
               </div>
 
-              <div className="master-slots-container">
-                {masterHours.map(h => {
-                  const apt = appointments.find(a => a.startsAt.startsWith(selectedDate) && getHour(a.startsAt) === h && a.status === 'CONFIRMED');
-                  const blk = blocks.find(b => b.startsAt.startsWith(selectedDate) && getHour(b.startsAt) === h);
-                  
-                  const vipSlot = vips.find(v => {
-                    if (v.weekday !== selectedDateDayOfWeek || v.time !== h) return false;
-                    const hasException = v.exceptions?.some((e: any) => new Date(e.date).toISOString().split('T')[0] === selectedDate);
-                    return !hasException;
-                  });
+              {/* LISTA DE HORAS: SOLO LAS HORAS REALES DE SU JORNADA */}
+              {isCurrentSelectedDayClosed ? (
+                <div style={{ background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: 14, padding: 30, textAlign: 'center', color: '#dc2626' }}>
+                  <ShieldAlert size={40} style={{ margin: '0 auto 10px' }} />
+                  <b style={{ fontSize: 16, display: 'block' }}>Este día se encuentra cerrado</b>
+                  <p style={{ fontSize: 13, color: '#7f1d1d', marginTop: 4 }}>Ningún cliente podrá agendar citas en esta fecha.</p>
+                </div>
+              ) : currentDayWorkingSlots.length === 0 ? (
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14, padding: 30, textAlign: 'center', color: '#64748b' }}>
+                  No tienes horas de trabajo configuradas para este día de la semana. Puedes configurarlo en la pestaña "Horarios y Precios".
+                </div>
+              ) : (
+                <div className="master-slots-container">
+                  {currentDayWorkingSlots.map(h => {
+                    const apt = appointments.find(a => a.startsAt.startsWith(selectedDate) && getHour(a.startsAt) === h && a.status === 'CONFIRMED');
+                    const blk = blocks.find(b => b.startsAt.startsWith(selectedDate) && getHour(b.startsAt) === h);
+                    
+                    const vipSlot = vips.find(v => {
+                      if (v.weekday !== selectedDateDayOfWeek || v.time !== h) return false;
+                      const hasException = v.exceptions?.some((e: any) => new Date(e.date).toISOString().split('T')[0] === selectedDate);
+                      return !hasException;
+                    });
 
-                  if (apt) {
+                    if (apt) {
+                      return (
+                        <div key={h} className="master-slot-row slot-booked">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                            <span className="slot-time-badge">{h}</span>
+                            <div>
+                              <span className="slot-status-pill booked">● Cita Reservada</span>
+                              <b style={{ display: 'block', fontSize: 15, marginTop: 4, color: '#0b1020' }}>{apt.clientName}</b>
+                              <span style={{ fontSize: 12, color: '#64748b' }}>Tel: {apt.clientPhone} · {apt.service?.name}</span>
+                            </div>
+                          </div>
+                          <button onClick={() => setConfirmModal({ open: true, id: apt.id, name: apt.clientName })} className="btn-action-sm btn-cancel">
+                            Cancelar Cita
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    if (vipSlot) {
+                      return (
+                        <div key={h} className="master-slot-row" style={{ borderLeft: '5px solid #d97706', background: '#fffbeb' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                            <span className="slot-time-badge">{h}</span>
+                            <div>
+                              <span className="slot-status-pill" style={{ background: '#fef3c7', color: '#b45309' }}>👑 Turno Fijo VIP Semanal</span>
+                              <b style={{ display: 'block', fontSize: 15, marginTop: 4, color: '#0b1020' }}>{vipSlot.client?.name}</b>
+                              <span style={{ fontSize: 12, color: '#64748b' }}>Tel: {vipSlot.client?.phone} · Turno habitual semanal</span>
+                            </div>
+                          </div>
+                          <button onClick={() => api.delete(`/api/vip/${vipSlot.id}`).then(loadData)} className="btn-action-sm btn-cancel">
+                            Eliminar Turno VIP
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    if (blk) {
+                      return (
+                        <div key={h} className="master-slot-row slot-blocked">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                            <span className="slot-time-badge">{h}</span>
+                            <div>
+                              <span className="slot-status-pill blocked">🔒 Bloqueada por ti</span>
+                              <span style={{ display: 'block', fontSize: 12, color: '#64748b', marginTop: 2 }}>Motivo: {blk.reason}</span>
+                            </div>
+                          </div>
+                          <button onClick={() => handleUnblock(blk.id)} className="btn-action-sm btn-unblock">
+                            <Unlock size={12} style={{ display: 'inline', marginRight: 4 }} /> Liberar Hora
+                          </button>
+                        </div>
+                      );
+                    }
+
                     return (
-                      <div key={h} className="master-slot-row slot-booked">
+                      <div key={h} className="master-slot-row slot-free">
                         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                           <span className="slot-time-badge">{h}</span>
-                          <div>
-                            <span className="slot-status-pill booked">● Cita Reservada</span>
-                            <b style={{ display: 'block', fontSize: 15, marginTop: 4, color: '#0b1020' }}>{apt.clientName}</b>
-                            <span style={{ fontSize: 12, color: '#64748b' }}>Tel: {apt.clientPhone} · {apt.service?.name}</span>
-                          </div>
+                          <span className="slot-status-pill free">● Disponible</span>
                         </div>
-                        <button onClick={() => setConfirmModal({ open: true, id: apt.id, name: apt.clientName })} className="btn-action-sm btn-cancel">
-                          Cancelar Cita
+                        <button onClick={() => { setSlotToBlock(h); setBlockModalOpen(true); }} className="btn-action-sm btn-block">
+                          <Lock size={12} style={{ display: 'inline', marginRight: 4 }} /> Bloquear
                         </button>
                       </div>
                     );
-                  }
-
-                  if (vipSlot) {
-                    return (
-                      <div key={h} className="master-slot-row" style={{ borderLeft: '5px solid #d97706', background: '#fffbeb' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                          <span className="slot-time-badge">{h}</span>
-                          <div>
-                            <span className="slot-status-pill" style={{ background: '#fef3c7', color: '#b45309' }}>👑 Turno Fijo VIP Semanal</span>
-                            <b style={{ display: 'block', fontSize: 15, marginTop: 4, color: '#0b1020' }}>{vipSlot.client?.name}</b>
-                            <span style={{ fontSize: 12, color: '#64748b' }}>Tel: {vipSlot.client?.phone} · Turno habitual semanal</span>
-                          </div>
-                        </div>
-                        <button onClick={() => api.delete(`/api/vip/${vipSlot.id}`).then(loadData)} className="btn-action-sm btn-cancel">
-                          Eliminar Turno VIP
-                        </button>
-                      </div>
-                    );
-                  }
-
-                  if (blk) {
-                    return (
-                      <div key={h} className="master-slot-row slot-blocked">
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                          <span className="slot-time-badge">{h}</span>
-                          <div>
-                            <span className="slot-status-pill blocked">🔒 Bloqueada por ti</span>
-                            <span style={{ display: 'block', fontSize: 12, color: '#64748b', marginTop: 2 }}>Motivo: {blk.reason}</span>
-                          </div>
-                        </div>
-                        <button onClick={() => handleUnblock(blk.id)} className="btn-action-sm btn-unblock">
-                          <Unlock size={12} style={{ display: 'inline', marginRight: 4 }} /> Liberar Hora
-                        </button>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div key={h} className="master-slot-row slot-free">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <span className="slot-time-badge">{h}</span>
-                        <span className="slot-status-pill free">● Disponible</span>
-                      </div>
-                      <button onClick={() => { setSlotToBlock(h); setBlockModalOpen(true); }} className="btn-action-sm btn-block">
-                        <Lock size={12} style={{ display: 'inline', marginRight: 4 }} /> Bloquear
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -598,7 +661,7 @@ export default function BarberDashboard() {
                               className="clean-input"
                               style={{ padding: '6px 10px', fontSize: 13, width: 100 }}
                             >
-                              {masterHours.map(h => <option key={h} value={h}>{h}</option>)}
+                              {masterHoursAll.map(h => <option key={h} value={h}>{h}</option>)}
                             </select>
                           </div>
 
@@ -616,7 +679,7 @@ export default function BarberDashboard() {
                               className="clean-input"
                               style={{ padding: '6px 10px', fontSize: 13, width: 100 }}
                             >
-                              {masterHours.map(h => <option key={h} value={h}>{h}</option>)}
+                              {masterHoursAll.map(h => <option key={h} value={h}>{h}</option>)}
                             </select>
                           </div>
                         </div>
@@ -630,7 +693,7 @@ export default function BarberDashboard() {
                 </div>
               </div>
 
-              {/* ÚNICAMENTE CONFIGURACIÓN DEL CORTE */}
+              {/* TARIFA DEL CORTE PRINCIPAL */}
               {corteService && (
                 <div className="client-calendar-card">
                   <span className="cal-eyebrow">TARIFA PRINCIPAL</span>
@@ -708,7 +771,7 @@ export default function BarberDashboard() {
         </div>
       )}
 
-      {/* MODAL ASIGNAR CLIENTE VIP */}
+      {/* MODAL ASIGNAR CLIENTE VIP CON VALIDACIÓN DE HORAS OCUPADAS */}
       {vipModalOpen && (
         <div className="modal-hours-overlay">
           <div className="modal-hours-box" style={{ maxWidth: 460 }}>
@@ -745,6 +808,7 @@ export default function BarberDashboard() {
               <option value={0}>Domingo</option>
             </select>
 
+            {/* Selector de Horas con horas ocupadas deshabilitadas */}
             <label className="input-label">Hora Fija Semanal</label>
             <select
               value={newVipTime}
@@ -752,9 +816,14 @@ export default function BarberDashboard() {
               className="clean-input"
               style={{ marginBottom: 20 }}
             >
-              {masterHours.map(h => (
-                <option key={h} value={h}>{h}</option>
-              ))}
+              {masterHoursAll.map(h => {
+                const isTaken = takenVipHoursInSelectedDay.includes(h);
+                return (
+                  <option key={h} value={h} disabled={isTaken}>
+                    {h} {isTaken ? '(Ocupado por otro VIP)' : ''}
+                  </option>
+                );
+              })}
             </select>
 
             <button onClick={handleCreateVip} className="btn-clean-submit">

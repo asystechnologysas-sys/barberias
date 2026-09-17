@@ -598,6 +598,26 @@ app.post('/api/vip', auth, activeTenant, asyncRoute(async (req, res) => {
   const barber = await db.barber.findFirst({ where: { organizationId: req.auth!.organizationId! } });
   if (!barber) return fail(res, 404, 'BARBER_NOT_FOUND', 'Barbero no encontrado.');
 
+  // VALIDACIÓN: Verificar si ya existe otro VIP en ese mismo día y hora
+  const existingVip = await db.vipSchedule.findFirst({
+    where: {
+      organizationId: req.auth!.organizationId!,
+      weekday: v.weekday,
+      time: v.time,
+      active: true
+    },
+    include: { client: true }
+  });
+
+  if (existingVip) {
+    return fail(
+      res,
+      409,
+      'VIP_SLOT_TAKEN',
+      `Este horario ya está asignado a otro cliente VIP (${existingVip.client?.name || 'Cliente registrado'}). Por favor elige otra hora.`
+    );
+  }
+
   const vip = await db.vipSchedule.create({
     data: {
       organizationId: req.auth!.organizationId!,
