@@ -319,7 +319,7 @@ app.get('/api/public/:slug/availability', asyncRoute(async (req, res) => {
   });
 }));
 
-// 2. AUTHENTICATION & VERIFICACIÓN OTP POR WHATSAPP (N8N)
+// 2. AUTHENTICATION, OTP & RECUPERACIÓN DE CONTRASEÑA
 app.post('/api/auth/send-otp', asyncRoute(async (req, res) => {
   const v = z.object({
     slug: z.string(),
@@ -360,6 +360,120 @@ app.post('/api/auth/send-otp', asyncRoute(async (req, res) => {
   });
 }));
 
+// Solicitar código para recuperación de contraseña
+app.post('/api/auth/forgot-password', asyncRoute(async (req, res) => {
+  const v = z.object({
+    slug: z.string(),
+    phone: z.string().min(7)
+  }).parse(req.body);
+
+  const org = await db.organization.findUnique({ where: { slug: v.slug } });
+  if (!org) return fail(res, 404, 'ORGANIZATION_NOT_FOUND', 'Barbería no encontrada.');
+
+  let cleanPhone = v.phone.replace(/[^0-9]/g, '');
+  if (cleanPhone.length === 10) cleanPhone = `57${cleanPhone}`;
+
+  // Verificar que el usuario exista
+  const user = await db.user.findFirst({
+    where: {
+      organizationId: org.id,
+      phone: cleanPhone
+    }
+  });
+
+  if (!user) {
+    return fail(res, 404, 'USER_NOT_FOUND', 'No encontramos ninguna cuenta registrada con este número de WhatsApp en esta barbería.');
+  }
+
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const codeHash = await bcrypt.hash(code, 8);
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+  await db.otp.create({
+    data: {
+      organizationId: org.id,
+      phone: cleanPhone,
+      codeHash,
+      expiresAt
+    }
+  });
+
+  // Disparar WhatsApp con tipo RESET_PASSWORD
+  triggerN8N({
+    tipo: 'RESET_PASSWORD',
+    phone: cleanPhone,
+    code,
+    tenantName: org.name
+  });
+
+  res.json({
+    success: true,
+    data: {
+      message: 'Código de recuperación enviado por WhatsApp.'
+    }
+  });
+}));
+
+// Restablecer contraseña con código de WhatsApp
+app.post('/api/auth/reset-password', asyncRoute(async (req, res) => {
+  const v = z.object({
+    slug: z.string(),
+    phone: z.string().min(7),
+    code: z.string().min(4),
+    newPassword: z.string().min(4)
+  }).parse(req.body);
+
+  const org = await db.organization.findUnique({ where: { slug: v.slug } });
+  if (!org) return fail(res, 404, 'ORGANIZATION_NOT_FOUND', 'Barbería no encontrada.');
+
+  let cleanPhone = v.phone.replace(/[^0-9]/g, '');
+  if (cleanPhone.length === 10) cleanPhone = `57${cleanPhone}`;
+
+  const latestOtp = await db.otp.findFirst({
+    where: {
+      organizationId: org.id,
+      phone: cleanPhone,
+      usedAt: null,
+      expiresAt: { gt: new Date() }
+    },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  if (!latestOtp || !(await bcrypt.compare(v.code, latestOtp.codeHash))) {
+    return fail(res, 400, 'INVALID_OTP', 'El código de seguridad es inválido o ha expirado.');
+  }
+
+  // Marcar OTP usado
+  await db.otp.update({
+    where: { id: latestOtp.id },
+    data: { usedAt: new Date() }
+  });
+
+  const user = await db.user.findFirst({
+    where: {
+      organizationId: org.id,
+      phone: cleanPhone
+    }
+  });
+
+  if (!user) {
+    return fail(res, 404, 'USER_NOT_FOUND', 'Usuario no encontrado.');
+  }
+
+  const passwordHash = await bcrypt.hash(v.newPassword, 10);
+  await db.user.update({
+    where: { id: user.id },
+    data: { passwordHash }
+  });
+
+  res.json({
+    success: true,
+    data: {
+      message: 'Tu contraseña ha sido actualizada exitosamente. Ahora puedes iniciar sesión.'
+    }
+  });
+}));
+
 app.post('/api/auth/login', asyncRoute(async (req, res) => {
   const v = z.object({
     email: z.string(),
@@ -368,7 +482,8 @@ app.post('/api/auth/login', asyncRoute(async (req, res) => {
   }).parse(req.body);
 
   const cleanLogin = v.email.trim();
-  const cleanPhone = cleanLogin.replace(/[^0-9+]/g, '');
+  let cleanPhone = cleanLogin.replace(/[^0-9]/g, '');
+  if (cleanPhone.length === 10) cleanPhone = `57${cleanPhone}`;
 
   let targetOrgId: string | undefined;
   if (v.slug) {
