@@ -4,8 +4,8 @@ import Login from './pages/Login';
 import SuperAdmin from './pages/SuperAdmin';
 import BarberDashboard from './pages/BarberDashboard';
 import PublicBooking from './pages/PublicBooking';
+import { TerminosPage, PrivacidadPage } from './pages/LegalPages';
 
-// Componente guardián: protege los paneles administrativos
 function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; allowedRole?: string }) {
   const token = localStorage.getItem('asys_token');
   const userStr = localStorage.getItem('asys_user');
@@ -34,10 +34,14 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/login" replace />} />
 
+        {/* Páginas Legales Requeridas por la SIC en Colombia */}
+        <Route path="/terminos" element={<TerminosPage />} />
+        <Route path="/privacidad" element={<PrivacidadPage />} />
+
         {/* Login global */}
         <Route path="/login" element={<Login />} />
 
-        {/* Login con tenant específico (ej. /login/roma) */}
+        {/* Login de Tenant Específico */}
         <Route path="/login/:slug" element={<Login />} />
 
         {/* Portal de agendamiento para clientes */}
@@ -53,7 +57,7 @@ export default function App() {
           }
         />
 
-        {/* Panel Central Superadmin */}
+        {/* Panel Central SuperAdmin */}
         <Route
           path="/superadmin"
           element={
@@ -63,7 +67,6 @@ export default function App() {
           }
         />
 
-        {/* Cualquier otra ruta redirige al login */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>

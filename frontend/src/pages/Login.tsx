@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import { MessageSquare, CheckCircle2, ShieldCheck, Sparkles } from 'lucide-react';
 import { api } from '../api';
 import logoAsys from './logoAsys.png';
@@ -17,11 +17,13 @@ export default function Login() {
   const [otpCode, setOtpCode] = useState('');
   const [loginUser, setLoginUser] = useState('');
   
+  // Consentimiento legal obligatorio en Colombia
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
   
-  // Estado para el envío de código WhatsApp
   const [sendingOtp, setSendingOtp] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [countdown, setCountdown] = useState(0);
@@ -34,7 +36,6 @@ export default function Login() {
     }
   }, [slug]);
 
-  // Temporizador para reenvío de código
   useEffect(() => {
     if (countdown > 0) {
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
@@ -72,8 +73,13 @@ export default function Login() {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
-    setLoading(true);
 
+    if (tab === 'register' && !acceptedTerms) {
+      setErrorMsg('Debes aceptar los Términos y la Política de Privacidad para crear tu cuenta.');
+      return;
+    }
+
+    setLoading(true);
     localStorage.removeItem('asys_token');
     localStorage.removeItem('asys_user');
 
@@ -259,7 +265,29 @@ export default function Login() {
                   />
                 </div>
 
-                <button type="submit" disabled={loading} className="btn-clean-submit">
+                {/* CHECKBOX DE ACEPTACIÓN LEGAL OBLIGATORIO EN COLOMBIA */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, margin: '14px 0 16px 2px' }}>
+                  <input
+                    type="checkbox"
+                    id="legalCheckbox"
+                    checked={acceptedTerms}
+                    onChange={(e) => setAcceptedTerms(e.target.checked)}
+                    style={{ marginTop: 3, cursor: 'pointer', accentColor: '#1554ff', width: 16, height: 16 }}
+                  />
+                  <label htmlFor="legalCheckbox" style={{ fontSize: 11.5, color: '#475569', lineHeight: 1.4, cursor: 'pointer' }}>
+                    He leído y acepto los{' '}
+                    <Link to="/terminos" target="_blank" style={{ color: '#1554ff', fontWeight: 700, textDecoration: 'underline' }}>
+                      Términos de Servicio
+                    </Link>{' '}
+                    y la{' '}
+                    <Link to="/privacidad" target="_blank" style={{ color: '#1554ff', fontWeight: 700, textDecoration: 'underline' }}>
+                      Política de Tratamiento de Datos Personales
+                    </Link>{' '}
+                    de ASYS TECHNOLOGIES S.A.S.
+                  </label>
+                </div>
+
+                <button type="submit" disabled={loading || !acceptedTerms} className="btn-clean-submit">
                   {loading ? 'Validando y Creando...' : 'Verificar WhatsApp y Registrarse →'}
                 </button>
               </>
