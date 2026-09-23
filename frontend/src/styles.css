@@ -1394,3 +1394,135 @@ h1, h2, h3, b, .font-sora {
   color: #dc2626 !important;
   font-weight: 800;
 }
+
+/* =========================================================
+   MEJORAS ULTRA-RESPONSIVE PARA CELULARES (PORTAL CLIENTE)
+   ========================================================= */
+
+/* Selector adaptable sin scroll horizontal */
+.selection-grid-auto {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.btn-select-pill {
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 10px 12px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-family: inherit;
+  width: 100%;
+}
+
+.btn-select-pill b {
+  font-size: 13px;
+  color: #0b1020;
+}
+
+.btn-select-pill span {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.btn-select-pill.active {
+  background: #1554ff !important;
+  border-color: #1554ff !important;
+  box-shadow: 0 4px 14px rgba(21, 84, 255, 0.25);
+}
+
+.btn-select-pill.active b,
+.btn-select-pill.active span {
+  color: #ffffff !important;
+}
+
+/* Ajustes estrictos para que el calendario NUNCA desborde la pantalla del celular */
+@media (max-width: 640px) {
+  .client-page-wrap {
+    padding-bottom: 40px !important;
+  }
+
+  .client-content-container {
+    padding: 0 8px !important;
+    margin-top: 12px !important;
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
+  }
+
+  .client-calendar-card {
+    padding: 14px 6px !important;
+    border-radius: 14px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .cal-month-title {
+    font-size: 16px !important;
+  }
+
+  /* 7 columnas exactas proporcionales sin desborde */
+  .cal-week-labels {
+    display: grid !important;
+    grid-template-columns: repeat(7, 1fr) !important;
+    font-size: 9px !important;
+    margin-bottom: 4px !important;
+    text-align: center !important;
+  }
+
+  .cal-days-grid {
+    display: grid !important;
+    grid-template-columns: repeat(7, 1fr) !important;
+    gap: 2px !important; /* Espacio mínimo entre celdas */
+    width: 100% !important;
+  }
+
+  .cal-cell {
+    min-height: 48px !important;
+    max-height: 54px !important;
+    padding: 3px 1px !important;
+    border-radius: 6px !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+  }
+
+  .cal-cell-num {
+    font-size: 11.5px !important;
+    line-height: 1 !important;
+  }
+
+  .cal-cell-status {
+    font-size: 7.5px !important;
+    line-height: 1.1 !important;
+    width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .selection-grid-auto {
+    grid-template-columns: repeat(2, 1fr) !important; /* 2 botones por fila en móvil */
+    gap: 6px !important;
+  }
+
+  .btn-select-pill {
+    padding: 8px 6px !important;
+  }
+
+  .btn-select-pill b {
+    font-size: 12px !important;
+  }
+
+  .btn-select-pill span {
+    font-size: 10px !important;
+  }
+}

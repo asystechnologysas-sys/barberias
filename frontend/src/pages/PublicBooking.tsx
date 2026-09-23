@@ -11,7 +11,7 @@ export default function PublicBooking() {
   const [loading, setLoading] = useState(true);
   const [selectedService, setSelectedService] = useState<any>(null);
   
-  // Barber selection: '' or 'any' = Cualquier barbero disponible
+  // Barber selection: 'any' = Cualquier barbero disponible
   const [selectedBarber, setSelectedBarber] = useState<string>('any');
   
   const [selectedDate, setSelectedDate] = useState<string>('');
@@ -92,7 +92,7 @@ export default function PublicBooking() {
     };
   });
 
-  // DISPONIBILIDAD SEGÚN BARBERO SELECCIONADO ("Cualquiera" o uno en específico)
+  // DISPONIBILIDAD SEGÚN BARBERO SELECCIONADO
   const refreshAvailability = useCallback(async () => {
     if (!org) return;
     const activeDays = currentMonthDays.filter(d => d.inRange);
@@ -276,7 +276,6 @@ export default function PublicBooking() {
   if (loading) return <div style={{ padding: 100, textAlign: 'center', color: '#64748b' }}>Cargando barbería...</div>;
   if (!org) return <div style={{ padding: 100, textAlign: 'center', color: '#ef4444' }}>Barbería no disponible.</div>;
 
-  // PANTALLA DE SUSPENSIÓN
   if (org.isSuspended) {
     return (
       <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f8fafc', padding: 20 }}>
@@ -313,10 +312,10 @@ export default function PublicBooking() {
               {currentUser ? (
                 myVipData ? (
                   <span style={{ color: '#d97706', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                    <Crown size={15} color="#f59e0b" /> {currentUser.name} (Cliente VIP)
+                    <Crown size={15} color="#f59e0b" /> {currentUser.name} (VIP)
                   </span>
                 ) : (
-                  `👋 Bienvenido, ${currentUser.name}`
+                  `👋 Hola, ${currentUser.name}`
                 )
               ) : (
                 'Agenda tu cita en segundos'
@@ -328,10 +327,10 @@ export default function PublicBooking() {
         <div>
           {token ? (
             <button onClick={handleLogout} className="btn-logout-modern" title="Cerrar sesión">
-              <LogOut size={15} /> Cerrar sesión
+              <LogOut size={15} /> Salir
             </button>
           ) : (
-            <Link to={`/login/${slug}`} className="btn-clean-submit" style={{ padding: '8px 18px', textDecoration: 'none', display: 'inline-block', fontSize: 13 }}>
+            <Link to={`/login/${slug}`} className="btn-clean-submit" style={{ padding: '8px 16px', textDecoration: 'none', display: 'inline-block', fontSize: 13, width: 'auto' }}>
               Iniciar Sesión
             </Link>
           )}
@@ -343,15 +342,15 @@ export default function PublicBooking() {
         
         {/* BANNER VIP */}
         {myVipData && !isReschedulingVip && (
-          <div style={{ background: '#fffdf5', border: '1.5px solid #fde68a', borderRadius: 18, padding: '18px 24px', marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, boxShadow: '0 4px 15px rgba(217, 119, 6, 0.06)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#fef3c7', display: 'grid', placeItems: 'center' }}>
-                <Crown size={24} color="#d97706" />
+          <div style={{ background: '#fffdf5', border: '1.5px solid #fde68a', borderRadius: 18, padding: '16px 20px', marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#fef3c7', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                <Crown size={22} color="#d97706" />
               </div>
               <div>
-                <b style={{ color: '#92400e', fontSize: 16, display: 'block' }}>Tu Turno Fijo VIP Semanal está Asegurado</b>
-                <span style={{ color: '#b45309', fontSize: 13 }}>
-                  Tienes reservado todos los <b>{weekdayNames[myVipData.weekday]} a las {myVipData.time}</b>. Tienes hasta 2 citas adicionales esta semana.
+                <b style={{ color: '#92400e', fontSize: 15, display: 'block' }}>Turno VIP Semanal Asegurado</b>
+                <span style={{ color: '#b45309', fontSize: 12.5 }}>
+                  Todos los <b>{weekdayNames[myVipData.weekday]} a las {myVipData.time}</b>.
                 </span>
               </div>
             </div>
@@ -364,7 +363,7 @@ export default function PublicBooking() {
               }}
               className="btn-vip-reschedule"
             >
-              <RefreshCw size={15} /> Cambiar Turno Esta Semana
+              <RefreshCw size={14} /> Cambiar Turno
             </button>
           </div>
         )}
@@ -372,22 +371,22 @@ export default function PublicBooking() {
         {/* PRÓXIMAS CITAS */}
         {myUpcomingAppointments.length > 0 && (
           <div className="upcoming-appointments-box">
-            <b style={{ color: '#1e3a8a', fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <CalIcon size={18} color="#1554ff" /> Tus Próximas Citas Agendadas
+            <b style={{ color: '#1e3a8a', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <CalIcon size={16} color="#1554ff" /> Tus Citas Agendadas
             </b>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
               {myUpcomingAppointments.map(apt => (
                 <div key={apt.id} className="upcoming-apt-card">
                   <div>
-                    <b style={{ fontSize: 14, color: '#0b1020' }}>
-                      {new Date(apt.startsAt).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })}
+                    <b style={{ fontSize: 13.5, color: '#0b1020' }}>
+                      {new Date(apt.startsAt).toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' })} · {new Date(apt.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </b>
-                    <span style={{ display: 'block', fontSize: 13, color: '#64748b', marginTop: 2 }}>
-                      Hora: {new Date(apt.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {apt.service?.name} (${Number(apt.price).toLocaleString('es-CO')}) · Barbero: {apt.barber?.displayName || 'Asignado'}
+                    <span style={{ display: 'block', fontSize: 12, color: '#64748b', marginTop: 2 }}>
+                      {apt.service?.name} (${Number(apt.price).toLocaleString('es-CO')}) · Barbero: {apt.barber?.displayName || 'Asignado'}
                     </span>
                   </div>
                   <button onClick={() => handleCancelMyAppointment(apt.id)} className="btn-action-sm btn-cancel">
-                    Cancelar Cita
+                    Cancelar
                   </button>
                 </div>
               ))}
@@ -395,31 +394,38 @@ export default function PublicBooking() {
           </div>
         )}
 
-        {/* SELECTOR DE BARBERO (SI HAY MÁS DE 1) */}
-        {org.barbers?.length > 1 && (
-          <div style={{ background: '#ffffff', border: '1.5px solid #e2e8f0', borderRadius: 18, padding: '16px 20px', marginBottom: 20 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <Scissors size={18} color="#1554ff" />
-              <b style={{ fontSize: 14, color: '#0b1020' }}>¿Tienes un barbero de preferencia?</b>
+        {/* SELECTOR DE SERVICIOS ADAPTATIVO (SIN SCROLL HORIZONTAL FORZADO) */}
+        {org.services?.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <span className="cal-eyebrow" style={{ display: 'block', marginBottom: 8 }}>1. ELIGE EL SERVICIO</span>
+            <div className="selection-grid-auto">
+              {org.services.map((svc: any) => (
+                <button
+                  key={svc.id}
+                  type="button"
+                  onClick={() => setSelectedService(svc)}
+                  className={`btn-select-pill ${selectedService?.id === svc.id ? 'active' : ''}`}
+                >
+                  <b>{svc.name}</b>
+                  <span>${Number(svc.price).toLocaleString('es-CO')}</span>
+                </button>
+              ))}
             </div>
+          </div>
+        )}
 
-            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+        {/* SELECTOR DE BARBEROS ADAPTATIVO (TODOS VISIBLES EN PANTALLA) */}
+        {org.barbers?.length > 1 && (
+          <div style={{ marginBottom: 20 }}>
+            <span className="cal-eyebrow" style={{ display: 'block', marginBottom: 8 }}>2. PREFERENCIA DE BARBERO</span>
+            <div className="selection-grid-auto">
               <button
                 type="button"
                 onClick={() => { setSelectedBarber('any'); setSelectedDate(''); setSelectedTime(''); }}
-                className="clean-tab-btn"
-                style={{
-                  background: selectedBarber === 'any' ? '#1554ff' : '#f8fafc',
-                  color: selectedBarber === 'any' ? '#ffffff' : '#0b1020',
-                  border: '1.5px solid #e2e8f0',
-                  borderRadius: 30,
-                  padding: '8px 18px',
-                  fontWeight: 700,
-                  whiteSpace: 'nowrap',
-                  fontSize: 13
-                }}
+                className={`btn-select-pill ${selectedBarber === 'any' ? 'active' : ''}`}
               >
-                ✨ Cualquiera (Mayor disponibilidad)
+                <b>✨ Cualquiera</b>
+                <span>Mayor disponibilidad</span>
               </button>
 
               {org.barbers.map((b: any) => (
@@ -427,71 +433,39 @@ export default function PublicBooking() {
                   key={b.id}
                   type="button"
                   onClick={() => { setSelectedBarber(b.id); setSelectedDate(''); setSelectedTime(''); }}
-                  className="clean-tab-btn"
-                  style={{
-                    background: selectedBarber === b.id ? '#1554ff' : '#f8fafc',
-                    color: selectedBarber === b.id ? '#ffffff' : '#0b1020',
-                    border: '1.5px solid #e2e8f0',
-                    borderRadius: 30,
-                    padding: '8px 18px',
-                    fontWeight: 700,
-                    whiteSpace: 'nowrap',
-                    fontSize: 13
-                  }}
+                  className={`btn-select-pill ${selectedBarber === b.id ? 'active' : ''}`}
                 >
-                  ✂️ {b.displayName}
+                  <b>✂️ {b.displayName}</b>
+                  <span>Barbero Asignado</span>
                 </button>
               ))}
             </div>
           </div>
         )}
 
-        {/* SELECTOR DE SERVICIOS */}
-        {org.services?.length > 0 && (
-          <div style={{ display: 'flex', gap: 8, marginBottom: 20, overflowX: 'auto', paddingBottom: 6 }}>
-            {org.services.map((svc: any) => (
-              <button
-                key={svc.id}
-                onClick={() => setSelectedService(svc)}
-                className="clean-tab-btn"
-                style={{
-                  background: selectedService?.id === svc.id ? '#1554ff' : '#ffffff',
-                  color: selectedService?.id === svc.id ? '#ffffff' : '#0b1020',
-                  border: '1.5px solid #e2e8f0',
-                  borderRadius: 30,
-                  padding: '8px 18px',
-                  fontWeight: 700,
-                  whiteSpace: 'nowrap',
-                  fontSize: 13
-                }}
-              >
-                {svc.name} · ${Number(svc.price).toLocaleString('es-CO')}
-              </button>
-            ))}
-          </div>
-        )}
-
+        {/* 3. CALENDARIO Y RESUMEN */}
         <div className="client-grid">
           
-          {/* Calendario con DOMINGO a SÁBADO */}
           <div className="client-calendar-card">
             <div className="cal-header-bar">
               <div>
-                <span className="cal-eyebrow">{isReschedulingVip ? 'REPROGRAMAR TURNO VIP' : 'AGENDA ONLINE'}</span>
+                <span className="cal-eyebrow">{isReschedulingVip ? 'REPROGRAMAR' : '3. SELECCIONA EL DÍA'}</span>
                 <h2 className="cal-month-title" style={{ textTransform: 'capitalize' }}>
                   {today.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })}
                 </h2>
               </div>
-              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Próximos 7 días hábiles</span>
+              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Próximos 7 días</span>
             </div>
 
+            {/* ETIQUETAS DE LA SEMANA */}
             <div className="cal-week-labels">
-              <span>DOM</span><span>LUN</span><span>MAR</span><span>MIE</span><span>JUE</span><span>VIE</span><span>SAB</span>
+              <span>DOM</span><span>LUN</span><span>MAR</span><span>MIÉ</span><span>JUE</span><span>VIE</span><span>SÁB</span>
             </div>
 
+            {/* GRILLA DE DÍAS */}
             <div className="cal-days-grid">
               {emptyPaddingDays.map((_, i) => (
-                <div key={`empty-${i}`} className="cal-cell cell-disabled" style={{ opacity: 0.15, minHeight: 64 }}></div>
+                <div key={`empty-${i}`} className="cal-cell cell-disabled" style={{ opacity: 0.15 }}></div>
               ))}
 
               {currentMonthDays.map((d, index) => {
@@ -499,7 +473,7 @@ export default function PublicBooking() {
 
                 if (!d.inRange) {
                   return (
-                    <div key={index} className="cal-cell cell-disabled" style={{ minHeight: 64, textAlign: 'center' }}>
+                    <div key={index} className="cal-cell cell-disabled">
                       <div className="cal-cell-num">{d.dayNum}</div>
                       <div className="cal-cell-status">
                         <span style={{ color: '#94a3b8' }}>Inactivo</span>
@@ -524,7 +498,6 @@ export default function PublicBooking() {
                     key={index}
                     onClick={() => handleDaySelect(d)}
                     className={`cal-cell ${badgeClass} ${isSelected ? 'cell-selected' : ''}`}
-                    style={{ minHeight: 64, textAlign: 'center' }}
                   >
                     <div className="cal-cell-num">{d.dayNum}</div>
                     <div className="cal-cell-status">
@@ -536,11 +509,11 @@ export default function PublicBooking() {
             </div>
           </div>
 
-          {/* Resumen lateral */}
+          {/* RESUMEN DE RESERVA */}
           <div className="client-sidebar">
             <div className="client-summary-card">
-              <h3 style={{ fontSize: 18, fontFamily: 'Sora', marginBottom: 16 }}>
-                {isReschedulingVip ? 'Confirmar Reprogramación VIP' : 'Resumen de tu Turno'}
+              <h3 style={{ fontSize: 17, fontFamily: 'Sora', marginBottom: 14 }}>
+                {isReschedulingVip ? 'Confirmar Reprogramación' : 'Resumen del Turno'}
               </h3>
 
               <div className="client-summary-row">
@@ -550,7 +523,7 @@ export default function PublicBooking() {
 
               <div className="client-summary-row">
                 <span>Barbero</span>
-                <b>{selectedBarber === 'any' ? '✨ Cualquiera disponible' : (org.barbers?.find((b: any) => b.id === selectedBarber)?.displayName || 'Asignado')}</b>
+                <b>{selectedBarber === 'any' ? '✨ Cualquiera' : (org.barbers?.find((b: any) => b.id === selectedBarber)?.displayName || 'Asignado')}</b>
               </div>
 
               <div className="client-summary-row">
@@ -566,43 +539,43 @@ export default function PublicBooking() {
               <div className="client-summary-row">
                 <span>Total a pagar</span>
                 <span className="client-summary-total">
-                  {isReschedulingVip ? '$0 (Turno VIP)' : `$${selectedService ? Number(selectedService.price).toLocaleString('es-CO') : '25.000'}`}
+                  {isReschedulingVip ? '$0 (VIP)' : `$${selectedService ? Number(selectedService.price).toLocaleString('es-CO') : '0'}`}
                 </span>
               </div>
 
-              <div style={{ marginTop: 20 }}>
+              <div style={{ marginTop: 18 }}>
                 <button
                   onClick={handleConfirmAction}
                   disabled={!selectedDate || !selectedTime}
                   className="btn-clean-submit"
                   style={isReschedulingVip ? { background: 'linear-gradient(135deg, #d97706, #f59e0b)', color: '#0b1020' } : {}}
                 >
-                  {isReschedulingVip ? 'Confirmar Cambio de Turno VIP →' : 'Confirmar cita →'}
+                  {isReschedulingVip ? 'Confirmar Cambio de Turno →' : 'Confirmar Cita →'}
                 </button>
               </div>
             </div>
 
             <div className="client-wa-card">
-              <h4>📱 Notificaciones Inmediatas</h4>
-              <p>Tu barbero recibirá el agendamiento y podrás consultar tus citas desde este panel.</p>
+              <h4>📱 Confirmación Inmediata</h4>
+              <p>Tu cita se confirmará y recibirás los detalles en tu WhatsApp.</p>
             </div>
           </div>
 
         </div>
       </div>
 
-      {/* MODAL DE HORARIOS FLOTANTE */}
+      {/* MODAL FLOTANTE DE HORAS */}
       {showHoursModal && (
         <div className="modal-hours-overlay">
           <div className="modal-hours-box">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <span className="cal-eyebrow">HORARIOS DISPONIBLES</span>
-                <h3 style={{ fontFamily: 'Sora', fontSize: 20, color: '#0b1020', marginTop: 2 }}>
+                <h3 style={{ fontFamily: 'Sora', fontSize: 18, color: '#0b1020', marginTop: 2 }}>
                   {new Date(selectedDate + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })}
                 </h3>
                 <p style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>
-                  Selecciona una hora disponible para tu cita.
+                  Toca una hora disponible para apartar tu turno.
                 </p>
               </div>
               <button onClick={() => setShowHoursModal(false)} className="btn-logout-modern" style={{ padding: '6px 10px' }}>
@@ -613,8 +586,8 @@ export default function PublicBooking() {
             {loadingHours ? (
               <div style={{ padding: 30, textAlign: 'center', color: '#64748b' }}>Consultando turnos...</div>
             ) : freeHours.length === 0 ? (
-              <div style={{ padding: 40, textAlign: 'center', color: '#ef4444', fontWeight: 800 }}>
-                Este día se encuentra cerrado o totalmente lleno.
+              <div style={{ padding: 30, textAlign: 'center', color: '#ef4444', fontWeight: 800 }}>
+                Este día no tiene horas libres disponibles.
               </div>
             ) : (
               <div className="modal-hours-grid">
@@ -646,8 +619,8 @@ export default function PublicBooking() {
               {alertModal.type === 'error' && <AlertCircle size={32} />}
               {alertModal.type === 'info' && <Sparkles size={32} />}
             </div>
-            <h3 style={{ fontFamily: 'Sora', fontSize: 20, marginBottom: 8, color: '#0b1020' }}>{alertModal.title}</h3>
-            <p style={{ color: '#64748b', fontSize: 14, lineHeight: 1.5, marginBottom: 22 }}>
+            <h3 style={{ fontFamily: 'Sora', fontSize: 19, marginBottom: 8, color: '#0b1020' }}>{alertModal.title}</h3>
+            <p style={{ color: '#64748b', fontSize: 13.5, lineHeight: 1.5, marginBottom: 20 }}>
               {alertModal.message}
             </p>
             <button
